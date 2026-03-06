@@ -1,0 +1,59 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+.env
+.venv/
+venv/
+*.db
+
+# ComfortOS Backend — .gitignore additions
+# Python
+*.pyo
+*.pyd
+*.pyc
+*.pdb
+*.egg
+*.eggs
+ENV/
+
+# Jupyter
+*.ipynb
+.ipynb_checkpoints/
+
+# Alembic
+alembic/versions/*.py
+
+# Environment files
+.env.*
+
+# Docker
+*.log
+docker-compose.override.yml
+
+# VS Code
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test outputs
+htmlcov/
+.coverage
+
+# Misc
+*.sqlite3
+
+# Node/npm (if frontend present)
+node_modules/
+
+# Ignore backup files
+*~
+*.bak
+*.swp
+*.swo
+
+# Ignore build artifacts
+build/
+dist/

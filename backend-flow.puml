@@ -1,0 +1,200 @@
+@startuml ComfortOS Backend Flow
+!theme plain
+skinparam linetype ortho
+skinparam defaultFontSize 12
+skinparam packagePadding 20
+
+title ComfortOS Smart Building Platform — Backend Flow
+
+' ──────────────────────────────────────────────────────────
+' Actors & External Systems
+' ──────────────────────────────────────────────────────────
+
+actor "Occupant\n(Flutter App)" as occupant
+actor "Building Manager\n(Flutter App)" as manager
+actor "External Building\nData Service" as external_svc #LightGray
+
+' ──────────────────────────────────────────────────────────
+' Frontend
+' ──────────────────────────────────────────────────────────
+
+package "Frontend — Flutter (ComfortOS App)" as frontend #AliceBlue {
+    component "AppEnvironment\n(local / staging / prod)" as app_env
+    component "Auth Module\n(login, token storage)" as fe_auth
+    component "SDUI Renderer\n(dashboard, vote form)" as fe_sdui
+    component "Vote Module\n(submit comfort votes)" as fe_vote
+    component "Presence Module\n(BLE beacons, geofence)" as fe_presence
+    component "Notification Handler\n(FCM / APNs)" as fe_notif
+
+    app_env -[hidden]down-> fe_auth
+    fe_auth -[hidden]down-> fe_sdui
+}
+
+note right of app_env
+  Flutter app switches between
+  local (localhost:8000) and
+  production API URLs via
+  AppEnvironment config.
+end note
+
+' ──────────────────────────────────────────────────────────
+' Backend — FastAPI
+' ──────────────────────────────────────────────────────────
+
+package "Backend — FastAPI (Platform API)" as backend #Honeydew {
+
+    ' ── Middleware Layer ──
+    package "Middleware" as mw {
+        component "CORS Middleware" as cors
+        component "Rate Limiter\n(per-IP sliding window)" as rate_limiter
+    }
+
+    ' ── Auth / Identity Provider ──
+    package "Identity Provider" as idp #LightYellow {
+        component "POST /auth/login" as login
+        component "POST /auth/refresh" as refresh
+        component "POST /auth/logout" as logout
+        component "GET  /auth/validate" as validate
+        component "Auth Service\n(JWT create/decode,\nbcrypt hash,\ntoken blacklist)" as auth_svc
+    }
+
+    ' ── Building & Config API ──
+    package "Building & Config API" as bldg_api #LightCyan {
+        component "GET /buildings" as list_buildings
+        component "GET /buildings/{id}/dashboard" as get_dashboard
+        component "GET /buildings/{id}/vote-form" as get_vote_form
+        component "GET /buildings/{id}/location-form" as get_location
+        component "GET /buildings/{id}/config" as get_config
+        component "GET /buildings/{id}/comfort" as get_comfort
+    }
+
+    ' ── Vote Ingestion API ──
+    package "Vote Ingestion API" as vote_api #MistyRose {
+        component "POST /votes\n(idempotent by UUID)" as submit_vote
+        component "GET  /votes/history" as vote_history
+    }
+
+    ' ── Presence & Notification API ──
+    package "Presence & Notification API" as pres_api #Lavender {
+        component "POST /presence/events" as report_event
+        component "GET  /presence/beacons" as get_beacons
+        component "POST /notifications/register" as reg_push
+        component "POST /notifications/send" as send_push
+    }
+
+    ' ── Connector Gateway (service module) ──
+    package "Connector Gateway" as cg #Wheat {
+        component "POST /datasets/read" as dataset_read
+        component "Gateway Service\n(resolve connector,\nfetch secrets,\nSSRF defense,\nresponse mapping)" as gw_svc
+    }
+
+    ' ── Shared Dependencies ──
+    component "Tenant Isolation\n(get_current_user, require_role)" as tenant_iso
+
+    ' ── Internal wiring ──
+    login  --> auth_svc
+    refresh --> auth_svc
+    logout --> auth_svc
+    validate --> auth_svc
+
+    dataset_read --> gw_svc
+
+    list_buildings --> tenant_iso
+    get_dashboard --> tenant_iso
+    submit_vote --> tenant_iso
+    report_event --> tenant_iso
+    dataset_read --> tenant_iso
+}
+
+' ──────────────────────────────────────────────────────────
+' Data Stores
+' ──────────────────────────────────────────────────────────
+
+database "PostgreSQL\n(Platform DB)" as platform_db #LightGreen {
+    storage "tenants" as t_tenants
+    storage "users" as t_users
+    storage "buildings" as t_buildings
+    storage "building_configs" as t_configs
+    storage "votes" as t_votes
+    storage "presence_events" as t_presence
+    storage "beacons" as t_beacons
+    storage "push_tokens" as t_push
+    storage "audit_logs" as t_audit
+}
+
+database "Registry DB\n(shared schema)" as registry_db #LemonChiffon {
+    storage "connector_definitions" as t_connectors
+    storage "dataset_definitions" as t_datasets
+}
+
+cloud "Secrets Manager\n(Vault / KMS)" as secrets_mgr #WhiteSmoke
+
+cloud "Push Provider\n(FCM / APNs)" as push_provider #WhiteSmoke
+
+' ──────────────────────────────────────────────────────────
+' Frontend → Backend flows
+' ──────────────────────────────────────────────────────────
+
+occupant --> fe_auth : opens app
+manager  --> fe_auth : opens app
+
+fe_auth -down-> cors : POST /auth/login\n(HTTPS + JSON)
+cors -down-> rate_limiter
+rate_limiter -down-> login
+
+fe_sdui -down-> cors : GET /buildings/{id}/dashboard
+fe_vote -down-> cors : POST /votes
+fe_presence -down-> cors : POST /presence/events
+fe_notif -down-> cors : POST /notifications/register
+
+' ──────────────────────────────────────────────────────────
+' Backend → Data Store flows
+' ──────────────────────────────────────────────────────────
+
+auth_svc    -down-> t_users    : authenticate\n& load user
+list_buildings -down-> t_buildings : query by tenant
+get_dashboard  -down-> t_configs   : load SDUI layout
+submit_vote    -down-> t_votes     : insert vote\n(idempotent)
+report_event   -down-> t_presence  : insert event
+get_beacons    -down-> t_beacons   : query by building
+reg_push       -down-> t_push      : upsert token
+send_push      -right-> push_provider : deliver notification
+
+' ── Connector Gateway data flow ──
+gw_svc -down-> t_connectors : resolve connector def
+gw_svc -down-> t_datasets : resolve dataset def
+gw_svc -right-> secrets_mgr : fetch secrets\n(mTLS / OAuth / HMAC)
+gw_svc -down-> external_svc  : HTTPS request\n(with auth headers)
+
+' ──────────────────────────────────────────────────────────
+' Legend
+' ──────────────────────────────────────────────────────────
+
+legend bottom left
+  |= Color |= Component |
+  | <#AliceBlue> | Frontend (Flutter) |
+  | <#Honeydew> | Backend (FastAPI) |
+  | <#LightYellow> | Identity Provider (JWT) |
+  | <#LightCyan> | Building & Config API |
+  | <#MistyRose> | Vote Ingestion API |
+  | <#Lavender> | Presence & Notifications |
+  | <#Wheat> | Connector Gateway |
+  | <#LightGreen> | Platform Database |
+  | <#LemonChiffon> | Registry Database |
+end legend
+
+' ──────────────────────────────────────────────────────────
+' Flow notes
+' ──────────────────────────────────────────────────────────
+
+note bottom of backend
+  **Request flow:**
+  1. Flutter app sends HTTPS request with JWT Bearer token
+  2. CORS middleware validates origin
+  3. Rate limiter checks per-IP request count
+  4. Route handler extracts JWT → loads User → checks tenant isolation
+  5. Business logic queries Platform DB or delegates to Connector Gateway
+  6. Response returned as JSON (SDUI layouts, vote confirmations, etc.)
+end note
+
+@enduml
