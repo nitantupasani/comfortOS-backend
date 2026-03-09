@@ -71,7 +71,11 @@ VOTE_FORM_V2 = {
         {
             "id": "thermal_comfort",
             "type": "thermal_scale",
-            "question": "How do you feel thermally?",
+            "question": "How hot or cold do you feel?",
+            "min": 1,
+            "max": 7,
+            "defaultValue": 4,
+            "labels": {"1": "Cold", "4": "Neutral", "7": "Hot"},
             "required": True,
         },
         {

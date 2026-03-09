@@ -27,6 +27,15 @@ from ..models.vote import Vote
 router = APIRouter(prefix="/buildings", tags=["buildings"])
 
 
+def _thermal_comfort_to_score(value: int | float) -> float | None:
+    """Normalise legacy -3..3 and current 1..7 thermal votes to a 0..10 score."""
+    if 1 <= value <= 7:
+        return ((value - 1) / 6) * 10
+    if -3 <= value <= 3:
+        return ((value + 3) / 6) * 10
+    return None
+
+
 @router.get("")
 async def list_buildings(
     tenantId: str | None = Query(None, description="Optional tenant filter"),
@@ -281,8 +290,9 @@ async def get_comfort_data(
         if isinstance(v.payload, dict):
             thermal = v.payload.get("thermal_comfort")
             if thermal is not None and isinstance(thermal, (int, float)):
-                # Map ASHRAE 7-point (-3 to +3) to 0-10 scale
-                scores.append(((thermal + 3) / 6) * 10)
+                score = _thermal_comfort_to_score(thermal)
+                if score is not None:
+                    scores.append(score)
 
     overall = sum(scores) / len(scores) if scores else 5.0
 
