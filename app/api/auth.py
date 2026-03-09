@@ -9,9 +9,15 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
-from ..schemas.auth import LoginRequest, AuthResponse, UserResponse
+from ..schemas.auth import (
+    LoginRequest,
+    GoogleLoginRequest,
+    AuthResponse,
+    UserResponse,
+)
 from ..services.auth_service import (
     authenticate_user,
+    authenticate_google_user,
     create_access_token,
     create_refresh_token,
     decode_token,
@@ -34,6 +40,26 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid credentials",
         )
+    token = create_access_token(user)
+    return AuthResponse(
+        token=token,
+        user=UserResponse(**user_to_response_dict(user)),
+    )
+
+
+@router.post("/google", response_model=AuthResponse)
+async def google_login(
+    body: GoogleLoginRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Authenticate with a verified Google ID token and return a platform JWT."""
+    user = await authenticate_google_user(db, body.id_token)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid Google identity token",
+        )
+
     token = create_access_token(user)
     return AuthResponse(
         token=token,

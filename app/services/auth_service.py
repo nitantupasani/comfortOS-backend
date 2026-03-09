@@ -1,24 +1,25 @@
-"""
-Authentication service — JWT token creation, password hashing, token blacklist.
+"""Authentication service — local and Google-backed identity flows."""
 
-Maps to the C4 'Identity Provider' container in backend.puml.
-"""
-
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from google.auth.transport import requests as google_requests
+from google.oauth2 import id_token as google_id_token
 from jose import jwt
 from passlib.context import CryptContext
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
-from ..models.user import User
+from ..models.user import User, UserRole
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # Simple in-memory token blacklist. In production use Redis or DB.
 _blacklisted_tokens: set[str] = set()
+_google_request = google_requests.Request()
+_google_issuers = {"accounts.google.com", "https://accounts.google.com"}
 
 
 def hash_password(plain: str) -> str:
@@ -84,6 +85,84 @@ async def authenticate_user(
     user = result.scalar_one_or_none()
     if user is None or not verify_password(password, user.hashed_password):
         return None
+    return user
+
+
+def verify_google_id_token(token: str) -> dict[str, Any] | None:
+    """Verify a Google ID token and return its claims."""
+    try:
+        claims = google_id_token.verify_oauth2_token(
+            token,
+            _google_request,
+            settings.google_oauth_client_id or None,
+        )
+    except Exception:
+        return None
+
+    if claims.get("iss") not in _google_issuers:
+        return None
+    if not claims.get("email") or not claims.get("email_verified"):
+        return None
+    return claims
+
+
+async def authenticate_google_user(
+    db: AsyncSession, id_token: str
+) -> User | None:
+    """Verify Google identity and map it to a local platform user."""
+    claims = verify_google_id_token(id_token)
+    if claims is None:
+        return None
+
+    email = str(claims["email"]).strip().lower()
+    result = await db.execute(select(User).where(User.email == email))
+    user = result.scalar_one_or_none()
+
+    if user is None:
+        name = str(claims.get("name") or email.split("@")[0])
+        user = User(
+            email=email,
+            name=name,
+            hashed_password=hash_password(uuid.uuid4().hex),
+            role=UserRole.occupant,
+            tenant_id=None,
+            claims={
+                "scopes": ["vote", "view_dashboard"],
+                "auth_provider": "google",
+                "google_sub": claims.get("sub"),
+            },
+        )
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
+        return user
+
+    if not user.is_active:
+        return None
+
+    updated = False
+    if claims.get("name") and user.name != claims["name"]:
+        user.name = str(claims["name"])
+        updated = True
+
+    existing_claims = dict(user.claims or {})
+    google_sub = claims.get("sub")
+    if google_sub:
+        if existing_claims.get("google_sub") not in (None, google_sub):
+            return None
+        if existing_claims.get("google_sub") != google_sub:
+            existing_claims["google_sub"] = google_sub
+            updated = True
+
+    if existing_claims.get("auth_provider") != "google":
+        existing_claims["auth_provider"] = "google"
+        updated = True
+
+    if updated:
+        user.claims = existing_claims
+        await db.commit()
+        await db.refresh(user)
+
     return user
 
 

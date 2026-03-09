@@ -1,15 +1,22 @@
 """Authentication request/response schemas.
 
 Matches the Identity Provider contract consumed by the Flutter frontend's
-HttpBackendAdapter (POST /auth/login, /auth/refresh, /auth/logout, GET /auth/validate).
+HttpBackendAdapter (POST /auth/login, /auth/google, /auth/refresh,
+/auth/logout, GET /auth/validate).
 """
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class LoginRequest(BaseModel):
     email: str
     password: str
+
+
+class GoogleLoginRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id_token: str = Field(alias="idToken", min_length=1)
 
 
 class TokenPayload(BaseModel):

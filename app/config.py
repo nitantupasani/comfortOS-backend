@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 7
+    google_oauth_client_id: str | None = (
+        "173455945512-f2ba6o8fhrbdrmbqiqlqskuisobuttun.apps.googleusercontent.com"
+    )
 
     # ── CORS ─────────────────────────────────────────────────────────────
     cors_origins: str = "*"
