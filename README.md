@@ -1,103 +1,134 @@
-# ComfortOS Production Backend
+# ComfortOS Backend
 
-Production backend for the ComfortOS Smart Building Platform, implementing
-the architecture described in `backend.puml`.
+Backend API for the ComfortOS Smart Building Platform.
 
-## Architecture (C4 Containers)
+## Tech Stack
 
-| Container | Technology | Description |
-|-----------|-----------|-------------|
-| **Platform API** | FastAPI (Python) | AuthZ, tenancy isolation, dashboard delivery, votes, tickets, dataset reads |
-| **Identity Provider** | JWT / OAuth2 (built-in) | Login, tokens, roles/claims |
-| **Connector Gateway** | Internal service module | Secure egress to external data services, secret resolution, normalization |
-| **Platform DB** | PostgreSQL | Tenants, buildings, configs, votes, tickets, audit log |
-| **Registry DB** | PostgreSQL (shared) | Connector Registry + Dataset Registry (versioned, approved) |
-| **Telemetry Store** | TimescaleDB (optional) | Cached/normalized measurements |
-| **Secrets Manager** | Environment / Vault | mTLS keys, OAuth secrets, HMAC keys |
-| **Push Provider** | FCM/APNs adapter | Notification delivery |
+| Component | Technology |
+|-----------|-----------|
+| **API** | FastAPI (Python) on Uvicorn |
+| **Auth** | Firebase Admin SDK (token verification) |
+| **Database** | Supabase PostgreSQL (Session Pooler) |
+| **ORM** | SQLAlchemy (async) + asyncpg |
+| **Migrations** | Alembic |
+| **Reverse Proxy** | Caddy (auto-HTTPS via Let's Encrypt) |
+| **Hosting** | Oracle Cloud VM (Ubuntu 22.04) |
+| **Domain** | https://api.scientify.in |
 
-## Quick Start
+## Database Tables
+
+`tenants`, `users`, `buildings`, `building_tenants`, `user_building_access`,
+`building_configs`, `votes`, `presence_events`, `beacons`, `push_tokens`,
+`audit_log`, `connector_definitions`, `dataset_definitions`
+
+## Local Development
 
 ```bash
-# 0. Create a local env file
-copy .env.example .env
+# 1. Create .env (see .env section below)
+# 2. Place firebase-service-account.json in backend/
 
-# 1. Start PostgreSQL, API, and pgAdmin
-docker-compose up -d db api pgadmin
-
-# 2. Install dependencies (optional if you run only in Docker)
+# 3. Install dependencies
+python -m venv venv
+venv\Scripts\activate        # Windows
 pip install -r requirements.txt
 
-# 3. Run migrations
+# 4. Run migrations
 alembic upgrade head
 
-# 4. Seed demo data
-python -m app.seed
-
-# 5. Start the server
+# 5. Start server
 uvicorn app.main:app --reload --port 8000
 ```
 
-## Local Secure Setup
+API docs: http://127.0.0.1:8000/docs
 
-For local development, prefer these defaults:
+## Required Files (not in git)
 
-- Keep services bound to `127.0.0.1` only.
-- Put secrets in `backend/.env` and never commit that file.
-- Replace the default database, JWT, and pgAdmin passwords before first run.
-- Restrict `CORS_ORIGINS` to your actual frontend origins instead of `*`.
+| File | How to get it |
+|------|---------------|
+| `.env` | Create manually (see below) |
+| `firebase-service-account.json` | Firebase Console → Project Settings → Service accounts → Generate new private key |
 
-The provided `docker-compose.yml` already binds PostgreSQL, the API, and pgAdmin to localhost only.
+### .env
 
-### Recommended local flow
+```dotenv
+DATABASE_URL=postgresql+asyncpg://postgres.XXXX:PASSWORD@aws-1-eu-central-1.pooler.supabase.com:5432/postgres
+FIREBASE_SERVICE_ACCOUNT_KEY_PATH=firebase-service-account.json
+FIREBASE_PROJECT_ID=comfortos
+API_PORT=8000
+CORS_ORIGINS=http://localhost:3000,http://localhost:5173,https://api.scientify.in
+DB_POOL_SIZE=3
+DB_MAX_OVERFLOW=5
+```
 
-1. Copy `.env.example` to `.env`.
-2. Set strong values for:
-	- `POSTGRES_PASSWORD`
-	- `SECRET_KEY`
-	- `PGADMIN_DEFAULT_PASSWORD`
-3. Start the local stack:
+## VM Deployment (Oracle Cloud)
 
-	```bash
-	docker-compose up -d db api pgadmin
-	```
+**VM:** 134.98.148.179 | **User:** ubuntu | **Domain:** api.scientify.in
 
-4. Open the API docs at `http://127.0.0.1:8000/docs`.
-5. Open pgAdmin at `http://127.0.0.1:5050`.
+### SSH into VM
 
-### pgAdmin connection details
+```bash
+ssh -i path/to/ssh-key.key ubuntu@134.98.148.179
+```
 
-When adding the PostgreSQL server in pgAdmin, use:
+### Restart backend
 
-- **Host**: `db` if pgAdmin is running in Docker, or `127.0.0.1` from your host machine
-- **Port**: `5432` inside Docker, or the value of `POSTGRES_PORT` from `.env` on the host machine
-- **Database**: value of `POSTGRES_DB`
-- **Username**: value of `POSTGRES_USER`
-- **Password**: value of `POSTGRES_PASSWORD`
+```bash
+sudo systemctl restart comfortos
+```
 
-### Visualizing the database
+### Check backend status / logs
 
-You have three practical options:
+```bash
+sudo systemctl status comfortos
+sudo journalctl -u comfortos --no-pager -n 30
+```
 
-1. **pgAdmin** — browse schemas, inspect rows, and run SQL locally.
-2. **DBeaver** — desktop client with a better ERD experience.
-3. **Schema introspection in PostgreSQL** — useful later on the VM for audits and backups.
+### Restart Caddy (reverse proxy)
 
-This backend currently models these core tables:
+```bash
+sudo systemctl restart caddy
+```
 
-- `tenants`
-- `users`
-- `buildings`
-- `building_configs`
-- `votes`
-- `presence_events`
-- `beacons`
-- `push_tokens`
-- `audit_logs`
-- `connector_definitions`
-- `dataset_definitions`
+### Deploy code updates
 
-`users` and `buildings` link back to `tenants`, which is the main tenancy boundary.
+```bash
+# 1. Push from local
+git add -A && git commit -m "message" && git push
+
+# 2. On VM
+cd ~/comfortOS-backend
+git pull
+sudo systemctl restart comfortos
+```
+
+### Copy .env / firebase key to VM (from local PowerShell)
+
+```powershell
+scp -i "path\to\ssh-key.key" backend\.env ubuntu@134.98.148.179:~/comfortOS-backend/
+scp -i "path\to\ssh-key.key" backend\firebase-service-account.json ubuntu@134.98.148.179:~/comfortOS-backend/
+```
+
+### Run migrations on VM
+
+```bash
+cd ~/comfortOS-backend
+source venv/bin/activate
+export $(grep -v '^#' .env | xargs)
+PYTHONPATH=/home/ubuntu/comfortOS-backend alembic upgrade head
+```
+
+### Service files on VM
+
+| File | Purpose |
+|------|---------|
+| `/etc/systemd/system/comfortos.service` | Uvicorn systemd service |
+| `/etc/caddy/Caddyfile` | Caddy reverse proxy config |
+
+### Test
+
+```bash
+curl https://api.scientify.in/health
+```
 
 ## Frontend Connection
 

@@ -1,17 +1,22 @@
 """
 Building & Config API routes.
 
-    GET  /buildings                     → List buildings (open + tenant-mapped)
-    GET  /buildings/{id}/dashboard      → SDUI dashboard config
-    GET  /buildings/{id}/vote-form      → SDUI vote form schema
-    GET  /buildings/{id}/location-form  → Floor/room hierarchy
-    GET  /buildings/{id}/config         → Full app config
-    GET  /buildings/{id}/comfort        → Aggregate comfort data
+    GET    /buildings                     → List buildings (open + tenant-mapped)
+    POST   /buildings                     → Create building (admin only)
+    PUT    /buildings/{id}                → Update building (admin only)
+    GET    /buildings/{id}/dashboard      → SDUI dashboard config
+    GET    /buildings/{id}/vote-form      → SDUI vote form schema
+    GET    /buildings/{id}/location-form  → Floor/room hierarchy
+    GET    /buildings/{id}/config         → Full app config
+    PUT    /buildings/{id}/config         → Upsert SDUI config (admin + FM)
+    GET    /buildings/{id}/comfort        → Aggregate comfort data
 """
 
 from datetime import datetime, timezone
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from pydantic import BaseModel
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,6 +28,34 @@ from ..models.building_tenant import BuildingTenant
 from ..models.building_config import BuildingConfig
 from ..models.user_building_access import UserBuildingAccess
 from ..models.vote import Vote
+
+
+# ── Request schemas ───────────────────────────────────────────────────────────
+
+class BuildingCreate(BaseModel):
+    name: str
+    address: str
+    city: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+    requiresAccessPermission: bool = False
+    dailyVoteLimit: int = 10
+
+
+class BuildingUpdate(BaseModel):
+    name: str | None = None
+    address: str | None = None
+    city: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+    requiresAccessPermission: bool | None = None
+    dailyVoteLimit: int | None = None
+
+
+class BuildingConfigUpdate(BaseModel):
+    dashboardLayout: Any | None = None
+    voteFormSchema: Any | None = None
+    locationFormConfig: Any | None = None
 
 router = APIRouter(prefix="/buildings", tags=["buildings"])
 
@@ -128,7 +161,68 @@ async def list_buildings(
     return buildings
 
 
-async def _get_building_with_access_check(
+@router.post("", status_code=201)
+async def create_building(
+    body: BuildingCreate,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a new building. Admin only."""
+    if user.role != UserRole.admin:
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    building = Building(
+        name=body.name,
+        address=body.address,
+        city=body.city,
+        latitude=body.latitude,
+        longitude=body.longitude,
+        requires_access_permission=body.requiresAccessPermission,
+        daily_vote_limit=body.dailyVoteLimit,
+    )
+    db.add(building)
+    await db.commit()
+    await db.refresh(building)
+    return building.to_api_dict()
+
+
+@router.put("/{building_id}")
+async def update_building(
+    building_id: str,
+    body: BuildingUpdate,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update building fields. Admin only."""
+    if user.role != UserRole.admin:
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    result = await db.execute(select(Building).where(Building.id == building_id))
+    building = result.scalar_one_or_none()
+    if building is None:
+        raise HTTPException(status_code=404, detail="Building not found")
+
+    if body.name is not None:
+        building.name = body.name
+    if body.address is not None:
+        building.address = body.address
+    if body.city is not None:
+        building.city = body.city
+    if body.latitude is not None:
+        building.latitude = body.latitude
+    if body.longitude is not None:
+        building.longitude = body.longitude
+    if body.requiresAccessPermission is not None:
+        building.requires_access_permission = body.requiresAccessPermission
+    if body.dailyVoteLimit is not None:
+        building.daily_vote_limit = body.dailyVoteLimit
+
+    await db.commit()
+    await db.refresh(building)
+    return building.to_api_dict()
+
+
+
     building_id: str, user: User, db: AsyncSession
 ) -> Building:
     """Helper: load building and verify the user has access.
@@ -256,7 +350,51 @@ async def get_app_config(
     }
 
 
-@router.get("/{building_id}/comfort")
+@router.put("/{building_id}/config")
+async def update_building_config(
+    building_id: str,
+    body: BuildingConfigUpdate,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Upsert SDUI config for a building. Admin or Facility Manager only."""
+    _FM_ROLES = (
+        UserRole.admin,
+        UserRole.building_facility_manager,
+        UserRole.tenant_facility_manager,
+    )
+    if user.role not in _FM_ROLES:
+        raise HTTPException(status_code=403, detail="Facility manager or admin only")
+
+    # Verify building exists
+    result = await db.execute(select(Building).where(Building.id == building_id))
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Building not found")
+
+    config = await _get_active_config(building_id, db)
+    if config is None:
+        config = BuildingConfig(building_id=building_id)
+        db.add(config)
+
+    if body.dashboardLayout is not None:
+        config.dashboard_layout = body.dashboardLayout
+    if body.voteFormSchema is not None:
+        config.vote_form_schema = body.voteFormSchema
+    if body.locationFormConfig is not None:
+        config.location_form_config = body.locationFormConfig
+    config.updated_at = datetime.now(timezone.utc)
+
+    await db.commit()
+    await db.refresh(config)
+    return {
+        "schemaVersion": config.schema_version,
+        "dashboardLayout": config.dashboard_layout,
+        "voteFormSchema": config.vote_form_schema,
+        "locationFormConfig": config.location_form_config,
+        "updatedAt": config.updated_at.isoformat(),
+    }
+
+
 async def get_comfort_data(
     building_id: str,
     user: User = Depends(get_current_user),
