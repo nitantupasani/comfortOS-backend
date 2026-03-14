@@ -292,7 +292,7 @@ async def get_dashboard_config(
     db: AsyncSession = Depends(get_db),
 ):
     """SDUI dashboard layout JSON. Returns 204 if no config exists."""
-    await _get_building_with_access_check(building_id, user, db)
+    await _get_accessible_building(building_id, user, db)
     config = await _get_active_config(building_id, db)
     if config is None or config.dashboard_layout is None:
         return Response(status_code=204)
@@ -306,7 +306,7 @@ async def get_vote_form_config(
     db: AsyncSession = Depends(get_db),
 ):
     """SDUI vote form schema JSON. Returns 204 if no config exists."""
-    await _get_building_with_access_check(building_id, user, db)
+    await _get_accessible_building(building_id, user, db)
     config = await _get_active_config(building_id, db)
     if config is None or config.vote_form_schema is None:
         return Response(status_code=204)
@@ -320,7 +320,7 @@ async def get_location_form_config(
     db: AsyncSession = Depends(get_db),
 ):
     """SDUI location form config (floor/room hierarchy). Returns 204 if none."""
-    await _get_building_with_access_check(building_id, user, db)
+    await _get_accessible_building(building_id, user, db)
     config = await _get_active_config(building_id, db)
     if config is None or config.location_form_config is None:
         return Response(status_code=204)
@@ -334,7 +334,7 @@ async def get_app_config(
     db: AsyncSession = Depends(get_db),
 ):
     """Full app config (schema version + all SDUI layouts)."""
-    building = await _get_building_with_access_check(building_id, user, db)
+    building = await _get_accessible_building(building_id, user, db)
     config = await _get_active_config(building_id, db)
 
     return {
@@ -390,13 +390,14 @@ async def update_building_config(
     }
 
 
+@router.get("/{building_id}/comfort")
 async def get_comfort_data(
     building_id: str,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Aggregate comfort data for a building. Returns 204 if no votes."""
-    building = await _get_building_with_access_check(building_id, user, db)
+    building = await _get_accessible_building(building_id, user, db)
 
     # Count votes and compute average comfort score
     result = await db.execute(
