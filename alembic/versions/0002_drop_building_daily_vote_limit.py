@@ -11,7 +11,7 @@ Create Date: 2026-03-14
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0002_drop_building_daily_vote_limit"
+revision = "0002_drop_bldg_vote_limit"
 down_revision = "0001_multi_tenant"
 branch_labels = None
 depends_on = None
