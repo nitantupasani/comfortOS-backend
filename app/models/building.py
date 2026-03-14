@@ -38,12 +38,6 @@ class Building(Base):
         server_default="0",
         comment="When True, only tenant-mapped users may access this building",
     )
-    daily_vote_limit: Mapped[int] = mapped_column(
-        Integer,
-        default=10,
-        server_default="10",
-        comment="Max votes a single user may submit per calendar day",
-    )
     metadata_: Mapped[dict | None] = mapped_column("metadata", JSON)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)

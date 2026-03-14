@@ -152,7 +152,6 @@ async def seed():
             latitude=51.4416,
             longitude=5.4697,
             requires_access_permission=True,
-            daily_vote_limit=10,
             metadata_={"floors": 1, "zones": 1},
         )
         session.add(vertigo_building)
