@@ -22,7 +22,7 @@ ENV/
 .ipynb_checkpoints/
 
 # Alembic
-alembic/versions/*.py
+alembic/versions/__pycache__/
 
 # Environment files
 .env
