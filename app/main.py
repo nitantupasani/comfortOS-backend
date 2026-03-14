@@ -13,6 +13,7 @@ Implements the C4 architecture from backend.puml:
     - Secure egress, secret resolution, normalization, caching, SSRF defenses
 """
 
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -41,6 +42,7 @@ from .models import (  # noqa: F401
     FMRoleRequest,
     FMRequestStatus,
     TelemetryReading,
+    BuildingConnector,
 )
 
 # API routers
@@ -52,14 +54,22 @@ from .api.presence import router as presence_router
 from .api.datasets import router as datasets_router
 from .api.fm_requests import router as fm_requests_router
 from .api.telemetry import router as telemetry_router
+from .api.connectors import router as connectors_router
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup: create tables (dev convenience). Shutdown: dispose engine."""
+    """Startup: create tables + start telemetry poller. Shutdown: cancel + dispose."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+    # Start background telemetry poller
+    from .services.telemetry_poller import start_polling_loop
+    poller_task = asyncio.create_task(start_polling_loop())
+
     yield
+
+    poller_task.cancel()
     await engine.dispose()
 
 
@@ -94,6 +104,7 @@ app.include_router(presence_router)
 app.include_router(datasets_router)
 app.include_router(fm_requests_router)
 app.include_router(telemetry_router)
+app.include_router(connectors_router)
 
 
 @app.get("/health")

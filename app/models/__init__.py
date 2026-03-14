@@ -13,6 +13,7 @@ from .audit import AuditLog
 from .connector_registry import ConnectorDefinition, DatasetDefinition
 from .fm_request import FMRoleRequest, FMRequestStatus
 from .telemetry import TelemetryReading
+from .building_connector import BuildingConnector
 
 __all__ = [
     "Tenant",
@@ -32,4 +33,5 @@ __all__ = [
     "FMRoleRequest",
     "FMRequestStatus",
     "TelemetryReading",
+    "BuildingConnector",
 ]
