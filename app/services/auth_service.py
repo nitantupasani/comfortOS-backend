@@ -14,6 +14,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..config import settings
 from ..models.user import User, UserRole
 
+# The one admin email — only this account gets the admin role automatically.
+ADMIN_EMAIL = "nitantupasani@gmail.com"
+
 # ── Firebase Admin SDK initialization ────────────────────────────────────
 
 _cred = firebase_creds.Certificate(settings.firebase_service_account_key_path)
@@ -49,15 +52,24 @@ async def get_or_create_firebase_user(
         # Auto-create new user from Firebase identity
         name = firebase_claims.get("name") or email.split("@")[0]
         auth_provider = firebase_claims.get("firebase", {}).get("sign_in_provider", "unknown")
+
+        # Assign admin role only for the designated admin email
+        role = UserRole.admin if email == ADMIN_EMAIL else UserRole.occupant
+        scopes = (
+            ["vote", "view_dashboard", "manage_platform"]
+            if role == UserRole.admin
+            else ["vote", "view_dashboard"]
+        )
+
         user = User(
             id=f"usr-{uuid.uuid4().hex[:8]}",
             email=email,
             name=name,
             hashed_password="FIREBASE_MANAGED",
-            role=UserRole.occupant,
+            role=role,
             tenant_id=None,
             claims={
-                "scopes": ["vote", "view_dashboard"],
+                "scopes": scopes,
                 "auth_provider": auth_provider,
                 "firebase_uid": firebase_uid,
             },

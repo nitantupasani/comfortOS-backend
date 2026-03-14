@@ -11,6 +11,7 @@ from .presence import PresenceEvent, Beacon
 from .notification import PushToken
 from .audit import AuditLog
 from .connector_registry import ConnectorDefinition, DatasetDefinition
+from .fm_request import FMRoleRequest, FMRequestStatus
 
 __all__ = [
     "Tenant",
@@ -27,4 +28,6 @@ __all__ = [
     "AuditLog",
     "ConnectorDefinition",
     "DatasetDefinition",
+    "FMRoleRequest",
+    "FMRequestStatus",
 ]

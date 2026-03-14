@@ -38,6 +38,8 @@ from .models import (  # noqa: F401
     AuditLog,
     ConnectorDefinition,
     DatasetDefinition,
+    FMRoleRequest,
+    FMRequestStatus,
 )
 
 # API routers
@@ -47,6 +49,7 @@ from .api.tenants import router as tenants_router
 from .api.votes import router as votes_router
 from .api.presence import router as presence_router
 from .api.datasets import router as datasets_router
+from .api.fm_requests import router as fm_requests_router
 
 
 @asynccontextmanager
@@ -87,6 +90,7 @@ app.include_router(tenants_router)
 app.include_router(votes_router)
 app.include_router(presence_router)
 app.include_router(datasets_router)
+app.include_router(fm_requests_router)
 
 
 @app.get("/health")
