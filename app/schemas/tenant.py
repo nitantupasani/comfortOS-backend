@@ -46,10 +46,11 @@ class OccupantOnboardRequest(BaseModel):
        ``email_domain`` the user is auto-assigned to that tenant.
     2. **Independent** — if no tenant matches the domain the user is
        created *without* a tenant and can only access open buildings.
+
+    Password is managed by Firebase Auth, not by the backend.
     """
     email: str
     name: str
-    password: str
     buildingIds: list[str] | None = None
 
 

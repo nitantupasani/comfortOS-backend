@@ -10,19 +10,14 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     """All configuration is loaded from environment variables or a .env file."""
 
-    # ── Database (Platform DB + Registry DB — shared PostgreSQL) ─────────
+    # ── Database (Supabase PostgreSQL) ──────────────────────────────────
     database_url: str = (
-        "postgresql+asyncpg://comfortos:comfortos@localhost:5432/comfortos"
+        "postgresql+asyncpg://postgres:postgres@localhost:5432/postgres"
     )
 
-    # ── JWT / Identity Provider ──────────────────────────────────────────
-    secret_key: str = "CHANGE-ME-IN-PRODUCTION"
-    algorithm: str = "HS256"
-    access_token_expire_minutes: int = 30
-    refresh_token_expire_days: int = 7
-    google_oauth_client_id: str | None = (
-        "173455945512-f2ba6o8fhrbdrmbqiqlqskuisobuttun.apps.googleusercontent.com"
-    )
+    # ── Firebase Authentication ──────────────────────────────────────────
+    firebase_service_account_key_path: str = "firebase-service-account.json"
+    firebase_project_id: str = "comfortos"
 
     # ── CORS ─────────────────────────────────────────────────────────────
     cors_origins: str = (
@@ -32,8 +27,13 @@ class Settings(BaseSettings):
         "http://127.0.0.1:5173,"
         "http://localhost:8000,"
         "http://127.0.0.1:8000,"
-        "https://comfortos.netlify.app/"
+        "https://comfortos.netlify.app,"
+        "https://api.scientify.in"
     )
+
+    # ── Database Pool (small VM — keep connections minimal) ──────────────
+    db_pool_size: int = 3
+    db_max_overflow: int = 5
 
     # ── Rate limiting ────────────────────────────────────────────────────
     rate_limit_requests: int = 100

@@ -11,12 +11,55 @@ Flow:
   Connector Gateway → Telemetry Store (cache/normalize results — optional)
 """
 
+import ipaddress
+from urllib.parse import urlparse
+
 import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from ..models.connector_registry import ConnectorDefinition, DatasetDefinition
+
+
+def _is_ssrf_blocked(url: str) -> bool:
+    """Return True if the URL resolves to a private/reserved/loopback address.
+
+    Blocks direct IP literals (all RFC1918 + loopback + link-local + reserved)
+    and known-dangerous hostnames.  DNS-resolved hostnames bypass this check;
+    a dedicated allowlisted egress proxy is the recommended production complement.
+    """
+    try:
+        host = (urlparse(url).hostname or "").lower()
+    except Exception:
+        return True  # malformed URL — block it
+
+    if not host:
+        return True
+
+    # Try to parse the host as a bare IP address (catches all RFC1918 / loopback /
+    # link-local / reserved / multicast ranges via the stdlib)
+    try:
+        addr = ipaddress.ip_address(host)
+        return (
+            addr.is_private
+            or addr.is_loopback
+            or addr.is_link_local
+            or addr.is_reserved
+            or addr.is_multicast
+            or addr.is_unspecified
+        )
+    except ValueError:
+        pass  # not a bare IP literal — check hostname patterns
+
+    # Block well-known internal hostnames and TLDs
+    blocked_exact = {"localhost", "metadata.google.internal", "instance-data"}
+    if host in blocked_exact:
+        return True
+    if host.endswith(".internal") or host.endswith(".local"):
+        return True
+
+    return False
 
 
 async def read_dataset(
@@ -72,9 +115,9 @@ async def read_dataset(
     # Step 4: Build URL with SSRF defenses
     url = f"{connector.base_url.rstrip('/')}/{dataset.endpoint_path.lstrip('/')}"
 
-    # Basic SSRF defense: reject private IPs
-    # (in production: use a dedicated egress proxy with allowlisting)
-    if any(prefix in url for prefix in ["localhost", "127.0.0.1", "0.0.0.0", "169.254"]):
+    # SSRF defense: reject private/loopback/reserved addresses
+    # (in production: also use a dedicated egress proxy with allowlisting)
+    if _is_ssrf_blocked(url):
         return None
 
     # Substitute template parameters

@@ -35,7 +35,7 @@ class User(Base):
     )
     email: Mapped[str] = mapped_column(String(254), unique=True, nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
-    hashed_password: Mapped[str] = mapped_column(String(200), nullable=False)
+    hashed_password: Mapped[str] = mapped_column(String(200), nullable=True, default="FIREBASE_MANAGED")
     role: Mapped[UserRole] = mapped_column(
         SAEnum(UserRole, name="user_role", create_constraint=False, native_enum=False),
         default=UserRole.occupant,

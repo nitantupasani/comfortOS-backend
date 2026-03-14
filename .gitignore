@@ -25,7 +25,11 @@ ENV/
 alembic/versions/*.py
 
 # Environment files
+.env
 .env.*
+
+# Firebase service account key (NEVER commit this)
+firebase-service-account.json
 
 # Docker
 *.log

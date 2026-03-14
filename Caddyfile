@@ -1,0 +1,3 @@
+api.scientify.in {
+	reverse_proxy localhost:8000
+}

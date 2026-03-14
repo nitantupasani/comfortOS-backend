@@ -4,12 +4,26 @@ SQLAlchemy async engine, session factory, and declarative base.
 Maps to the C4 'Platform DB' container.
 """
 
+import ssl
+
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
 from .config import settings
 
-engine = create_async_engine(settings.database_url, echo=False, future=True)
+# Supabase (and most managed PostgreSQL providers) require SSL.
+# asyncpg accepts an ssl context via connect_args.
+_ssl_context = ssl.create_default_context()
+engine = create_async_engine(
+    settings.database_url,
+    echo=False,
+    future=True,
+    pool_size=settings.db_pool_size,
+    max_overflow=settings.db_max_overflow,
+    pool_recycle=300,
+    pool_pre_ping=True,
+    connect_args={"ssl": _ssl_context},
+)
 
 async_session_factory = async_sessionmaker(
     engine, class_=AsyncSession, expire_on_commit=False

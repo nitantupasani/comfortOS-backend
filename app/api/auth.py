@@ -1,7 +1,8 @@
 """
-Auth routes — POST /auth/login, /auth/refresh, /auth/logout, GET /auth/validate.
+Auth routes — POST /auth/firebase, GET /auth/validate.
 
-Maps to the C4 'Identity Provider' container.
+Authentication is handled by Firebase. The client sends a Firebase ID token,
+and the backend verifies it and returns the local user record.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -10,18 +11,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
 from ..schemas.auth import (
-    LoginRequest,
-    GoogleLoginRequest,
+    FirebaseLoginRequest,
     AuthResponse,
     UserResponse,
 )
 from ..services.auth_service import (
-    authenticate_user,
-    authenticate_google_user,
-    create_access_token,
-    create_refresh_token,
-    decode_token,
-    blacklist_token,
+    verify_firebase_token,
+    get_or_create_firebase_user,
     user_to_response_dict,
 )
 from ..api.deps import get_current_user
@@ -31,88 +27,43 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 _bearer = HTTPBearer(auto_error=False)
 
 
-@router.post("/login", response_model=AuthResponse)
-async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
-    """Authenticate with email/password. Returns JWT + user object."""
-    user = await authenticate_user(db, body.email, body.password)
+@router.post("/firebase", response_model=AuthResponse)
+async def firebase_login(
+    body: FirebaseLoginRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Authenticate with a Firebase ID token. Returns the token back + user object.
+
+    The Flutter app signs in via Firebase Auth (Google, email/password, etc.)
+    and sends the Firebase ID token here. The backend verifies it, creates or
+    looks up the local user, and returns the user data.
+
+    The client continues to use the same Firebase ID token for subsequent
+    API calls (verified in deps.get_current_user).
+    """
+    firebase_claims = verify_firebase_token(body.id_token)
+    if firebase_claims is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid Firebase identity token",
+        )
+
+    user = await get_or_create_firebase_user(db, firebase_claims)
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials",
-        )
-    token = create_access_token(user)
-    return AuthResponse(
-        token=token,
-        user=UserResponse(**user_to_response_dict(user)),
-    )
-
-
-@router.post("/google", response_model=AuthResponse)
-async def google_login(
-    body: GoogleLoginRequest,
-    db: AsyncSession = Depends(get_db),
-):
-    """Authenticate with a verified Google ID token and return a platform JWT."""
-    user = await authenticate_google_user(db, body.id_token)
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid Google identity token",
+            detail="Could not resolve Firebase user",
         )
 
-    token = create_access_token(user)
     return AuthResponse(
-        token=token,
+        token=body.id_token,
         user=UserResponse(**user_to_response_dict(user)),
     )
-
-
-@router.post("/refresh", response_model=AuthResponse)
-async def refresh_token(
-    credentials: HTTPAuthorizationCredentials = Depends(_bearer),
-    db: AsyncSession = Depends(get_db),
-):
-    """Refresh an access token. Accepts current token in Authorization header."""
-    if credentials is None:
-        raise HTTPException(status_code=401, detail="Missing token")
-
-    claims = decode_token(credentials.credentials)
-    if claims is None:
-        raise HTTPException(status_code=401, detail="Token expired or invalid")
-
-    # Blacklist old token
-    blacklist_token(credentials.credentials)
-
-    from sqlalchemy import select
-    from ..models.user import User as UserModel
-
-    result = await db.execute(
-        select(UserModel).where(UserModel.id == claims["sub"])
-    )
-    user = result.scalar_one_or_none()
-    if user is None:
-        raise HTTPException(status_code=401, detail="User not found")
-
-    new_token = create_access_token(user)
-    return AuthResponse(
-        token=new_token,
-        user=UserResponse(**user_to_response_dict(user)),
-    )
-
-
-@router.post("/logout")
-async def logout(
-    credentials: HTTPAuthorizationCredentials = Depends(_bearer),
-):
-    """Invalidate the current token."""
-    if credentials:
-        blacklist_token(credentials.credentials)
-    return {"status": "ok"}
 
 
 @router.get("/validate")
 async def validate_token(user: User = Depends(get_current_user)):
-    """Validate the current token and return user claims."""
+    """Validate the current Firebase token and return user claims."""
     return {
         "valid": True,
         "user": user_to_response_dict(user),

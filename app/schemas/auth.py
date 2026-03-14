@@ -1,31 +1,19 @@
 """Authentication request/response schemas.
 
 Matches the Identity Provider contract consumed by the Flutter frontend's
-HttpBackendAdapter (POST /auth/login, /auth/google, /auth/refresh,
-/auth/logout, GET /auth/validate).
+HttpBackendAdapter (POST /auth/firebase, GET /auth/validate).
+
+Firebase handles all token issuance; the backend only verifies tokens.
 """
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class LoginRequest(BaseModel):
-    email: str
-    password: str
-
-
-class GoogleLoginRequest(BaseModel):
+class FirebaseLoginRequest(BaseModel):
+    """Client sends a Firebase ID token for backend verification."""
     model_config = ConfigDict(populate_by_name=True)
 
     id_token: str = Field(alias="idToken", min_length=1)
-
-
-class TokenPayload(BaseModel):
-    """JWT claims embedded in the access token."""
-    sub: str  # user id
-    email: str
-    role: str
-    tenant_id: str | None = None
-    scopes: list[str] = []
 
 
 class UserResponse(BaseModel):

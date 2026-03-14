@@ -15,7 +15,6 @@ from .models.building_tenant import BuildingTenant
 from .models.user_building_access import UserBuildingAccess
 from .models.building_config import BuildingConfig
 from .models.presence import Beacon
-from .services.auth_service import hash_password
 
 
 # ── Demo SDUI Configs (subset from DummyBackend) ────────────────────────
@@ -161,9 +160,9 @@ async def seed():
         # ── Users ────────────────────────────────────────────────────────
         admin_user = User(
             id="usr-admin",
-            email="nitantupasani@gmail.com",
+            email="admin@comfortos.com",
             name="Nitant Upasani",
-            hashed_password=hash_password(admin_password),
+            hashed_password="FIREBASE_MANAGED",
             role=UserRole.admin,
             tenant_id=None,
             claims={"scopes": ["admin", "manage_building", "vote", "view_dashboard"]},
@@ -172,7 +171,7 @@ async def seed():
             id="usr-occupant",
             email="occupant@comfortos.com",
             name="Occupant",
-            hashed_password=hash_password("occupant123"),
+            hashed_password="FIREBASE_MANAGED",
             role=UserRole.occupant,
             tenant_id=None,
             claims={"scopes": ["vote", "view_dashboard"]},
@@ -181,7 +180,7 @@ async def seed():
             id="usr-fm",
             email="fm@comfortos.com",
             name="Facility Manager",
-            hashed_password=hash_password("fm123"),
+            hashed_password="FIREBASE_MANAGED",
             role=UserRole.building_facility_manager,
             tenant_id=None,
             claims={"scopes": ["manage_building", "vote", "view_dashboard"]},

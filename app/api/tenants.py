@@ -31,7 +31,6 @@ from ..schemas.tenant import (
     UserBuildingAccessGrantRequest,
     UserBuildingAccessResponse,
 )
-from ..services.auth_service import hash_password
 
 router = APIRouter(tags=["tenants"])
 
@@ -141,7 +140,7 @@ async def onboard_occupant(
     new_user = User(
         email=body.email,
         name=body.name,
-        hashed_password=hash_password(body.password),
+        hashed_password="FIREBASE_MANAGED",
         role=UserRole.occupant,
         tenant_id=tenant_id,
         claims={"scopes": ["vote", "view_dashboard"]},
