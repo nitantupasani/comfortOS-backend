@@ -59,11 +59,16 @@ router = APIRouter(prefix="/buildings", tags=["buildings"])
 
 
 def _thermal_comfort_to_score(value: int | float) -> float | None:
-    """Normalise legacy -3..3 and current 1..7 thermal votes to a 0..10 score."""
+    """Convert a thermal comfort vote to a 1–10 satisfaction score.
+
+    Scale: -3 (cold) → 0 (neutral/perfect) → +3 (hot).
+    Satisfaction is highest (10) at neutral (0) and lowest (1) at extremes (±3).
+    Legacy 1–7 values are first centred to -3..+3  (subtract 4).
+    """
     if 1 <= value <= 7:
-        return ((value - 1) / 6) * 10
+        value = value - 4  # centre: 1→-3, 4→0, 7→+3
     if -3 <= value <= 3:
-        return ((value + 3) / 6) * 10
+        return round(1 + 9 * (1 - abs(value) / 3), 1)
     return None
 
 
