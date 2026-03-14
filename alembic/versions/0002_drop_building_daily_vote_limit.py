@@ -18,7 +18,7 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.drop_column("buildings", "daily_vote_limit")
+    op.execute("ALTER TABLE buildings DROP COLUMN IF EXISTS daily_vote_limit")
 
 
 def downgrade() -> None:
