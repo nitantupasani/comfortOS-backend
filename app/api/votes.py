@@ -3,9 +3,10 @@ Vote Ingestion API routes.
 
     POST /votes                  → Submit comfort vote (idempotent by voteUuid)
     GET  /votes/history?userId=  → Vote history for a user
+    GET  /votes/analytics        → Building-wide vote analytics (admin/FM)
 """
 
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, func
@@ -157,3 +158,63 @@ async def get_vote_history(
     )
     votes = result.scalars().all()
     return [v.to_api_dict() for v in votes]
+
+
+@router.get("/analytics")
+async def get_vote_analytics(
+    buildingId: str = Query(..., description="Building ID"),
+    dateFrom: str | None = Query(None, description="Start date (ISO format)"),
+    dateTo: str | None = Query(None, description="End date (ISO format)"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return all votes for a building, for analytics dashboards.
+
+    Access: admin and facility-manager roles only.
+    Supports optional date-range filtering via ``dateFrom`` / ``dateTo``.
+    """
+    # Role gate
+    if user.role not in (
+        UserRole.admin,
+        UserRole.building_facility_manager,
+        UserRole.tenant_facility_manager,
+    ):
+        raise HTTPException(status_code=403, detail="Analytics requires FM or admin role")
+
+    # Verify building exists
+    building_result = await db.execute(
+        select(Building).where(Building.id == buildingId)
+    )
+    building = building_result.scalar_one_or_none()
+    if building is None:
+        raise HTTPException(status_code=404, detail="Building not found")
+
+    # Build query
+    query = select(VoteModel).where(VoteModel.building_id == buildingId)
+
+    if dateFrom:
+        try:
+            dt_from = datetime.fromisoformat(dateFrom).replace(tzinfo=timezone.utc)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid dateFrom format")
+        query = query.where(VoteModel.created_at >= dt_from)
+
+    if dateTo:
+        try:
+            dt_to = datetime.fromisoformat(dateTo).replace(tzinfo=timezone.utc)
+            # Include the full end day
+            dt_to = dt_to.replace(hour=23, minute=59, second=59)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid dateTo format")
+        query = query.where(VoteModel.created_at <= dt_to)
+
+    query = query.order_by(VoteModel.created_at.desc()).limit(10000)
+    result = await db.execute(query)
+    votes = result.scalars().all()
+
+    return {
+        "buildingId": buildingId,
+        "buildingName": building.name,
+        "totalVotes": len(votes),
+        "votes": [v.to_api_dict() for v in votes],
+    }
