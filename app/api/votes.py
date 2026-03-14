@@ -22,29 +22,28 @@ from ..schemas.vote import VoteSubmitRequest, VoteSubmitResponse
 
 router = APIRouter(prefix="/votes", tags=["votes"])
 
+DAILY_VOTE_LIMIT = 10  # max votes a single occupant may submit per calendar day
+
 
 async def _check_daily_vote_limit(
-    user_id: str, building: Building, db: AsyncSession
+    user_id: str, building_id: str, db: AsyncSession
 ) -> None:
-    """Raise 429 if the user has already reached the building's daily vote cap."""
+    """Raise 429 if the user has already reached the per-user daily vote cap."""
     today_start = datetime.now(timezone.utc).replace(
         hour=0, minute=0, second=0, microsecond=0
     )
     result = await db.execute(
         select(func.count(VoteModel.vote_uuid)).where(
             VoteModel.user_id == user_id,
-            VoteModel.building_id == building.id,
+            VoteModel.building_id == building_id,
             VoteModel.created_at >= today_start,
         )
     )
     count = result.scalar() or 0
-    if count >= building.daily_vote_limit:
+    if count >= DAILY_VOTE_LIMIT:
         raise HTTPException(
             status_code=429,
-            detail=(
-                f"Daily vote limit reached ({building.daily_vote_limit} votes/day "
-                f"for this building)"
-            ),
+            detail=f"Daily vote limit reached ({DAILY_VOTE_LIMIT} votes/day)",
         )
 
 
@@ -113,7 +112,7 @@ async def submit_vote(
             )
 
     # Per-user daily vote rate limit
-    await _check_daily_vote_limit(user.id, building, db)
+    await _check_daily_vote_limit(user.id, body.buildingId, db)
 
     # Create vote
     vote = VoteModel(

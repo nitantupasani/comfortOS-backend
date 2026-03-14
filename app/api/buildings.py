@@ -39,7 +39,6 @@ class BuildingCreate(BaseModel):
     latitude: float | None = None
     longitude: float | None = None
     requiresAccessPermission: bool = False
-    dailyVoteLimit: int = 10
 
 
 class BuildingUpdate(BaseModel):
@@ -49,7 +48,6 @@ class BuildingUpdate(BaseModel):
     latitude: float | None = None
     longitude: float | None = None
     requiresAccessPermission: bool | None = None
-    dailyVoteLimit: int | None = None
 
 
 class BuildingConfigUpdate(BaseModel):
@@ -178,7 +176,6 @@ async def create_building(
         latitude=body.latitude,
         longitude=body.longitude,
         requires_access_permission=body.requiresAccessPermission,
-        daily_vote_limit=body.dailyVoteLimit,
     )
     db.add(building)
     await db.commit()
@@ -214,8 +211,6 @@ async def update_building(
         building.longitude = body.longitude
     if body.requiresAccessPermission is not None:
         building.requires_access_permission = body.requiresAccessPermission
-    if body.dailyVoteLimit is not None:
-        building.daily_vote_limit = body.dailyVoteLimit
 
     await db.commit()
     await db.refresh(building)

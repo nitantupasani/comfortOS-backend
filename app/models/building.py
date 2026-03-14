@@ -71,6 +71,5 @@ class Building(Base):
             "latitude": self.latitude,
             "longitude": self.longitude,
             "requiresAccessPermission": self.requires_access_permission,
-            "dailyVoteLimit": self.daily_vote_limit,
             "metadata": self.metadata_,
         }

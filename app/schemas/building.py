@@ -13,7 +13,6 @@ class BuildingResponse(BaseModel):
     latitude: float | None = None
     longitude: float | None = None
     requiresAccessPermission: bool = False
-    dailyVoteLimit: int = 10
     metadata: dict | None = None
 
 
