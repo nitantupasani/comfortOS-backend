@@ -222,7 +222,7 @@ async def update_building(
     return building.to_api_dict()
 
 
-
+async def _get_accessible_building(
     building_id: str, user: User, db: AsyncSession
 ) -> Building:
     """Helper: load building and verify the user has access.
