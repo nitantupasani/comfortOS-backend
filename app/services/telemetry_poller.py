@@ -320,13 +320,21 @@ async def poll_single_connector(
             if connector.http_method == "POST":
                 response = await client.post(url, content=body_bytes, headers=headers)
             else:
-                response = await client.get(url, headers=headers)
+                params = {}
+                if connector.available_metrics:
+                    params["metrics"] = ",".join(connector.available_metrics)
+                response = await client.get(url, headers=headers, params=params)
 
             response.raise_for_status()
             resp_data = response.json()
 
         # Parse response
         readings = _parse_response(resp_data, connector)
+
+        # Filter to declared metric types (if configured)
+        if connector.available_metrics:
+            allowed = set(connector.available_metrics)
+            readings = [r for r in readings if r["metricType"] in allowed]
 
         if dry_run:
             return ConnectorTestResult(

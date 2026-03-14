@@ -87,6 +87,13 @@ class BuildingConnector(Base):
         comment="Optional mapping from custom response format to ComfortOS schema",
     )
 
+    # ── Available Metrics ──
+
+    available_metrics: Mapped[list | None] = mapped_column(
+        JSON, nullable=True,
+        comment="Metric types this connector provides, e.g. ['temperature','co2','humidity','noise']",
+    )
+
     # ── Polling ──
 
     polling_interval_minutes: Mapped[int] = mapped_column(
@@ -151,6 +158,7 @@ class BuildingConnector(Base):
             "authType": self.auth_type,
             "authConfig": self._masked_auth() if mask_secrets else self.auth_config,
             "responseMapping": self.response_mapping,
+            "availableMetrics": self.available_metrics,
             "pollingIntervalMinutes": self.polling_interval_minutes,
             "isEnabled": self.is_enabled,
             "lastPolledAt": self.last_polled_at.isoformat() if self.last_polled_at else None,

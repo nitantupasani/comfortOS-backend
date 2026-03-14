@@ -26,6 +26,7 @@ def upgrade() -> None:
         sa.Column("auth_type", sa.String(30), nullable=False, server_default="bearer_token"),
         sa.Column("auth_config", sa.JSON, nullable=False, server_default="{}"),
         sa.Column("response_mapping", sa.JSON, nullable=True),
+        sa.Column("available_metrics", sa.JSON, nullable=True),
         sa.Column("polling_interval_minutes", sa.Integer, nullable=False, server_default="15"),
         sa.Column("is_enabled", sa.Boolean, nullable=False, server_default="true"),
         sa.Column("last_polled_at", sa.DateTime(timezone=True), nullable=True),

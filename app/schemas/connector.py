@@ -55,6 +55,10 @@ class ConnectorCreate(BaseModel):
     )
     authConfig: dict = Field(default_factory=dict)
     responseMapping: dict | None = None
+    availableMetrics: list[str] | None = Field(
+        None,
+        description="Metric types this connector provides, e.g. ['temperature','co2','humidity','noise']",
+    )
     pollingIntervalMinutes: int = Field(15, ge=1, le=1440)
     isEnabled: bool = True
 
@@ -69,6 +73,7 @@ class ConnectorUpdate(BaseModel):
     authType: str | None = None
     authConfig: dict | None = None
     responseMapping: dict | None = None
+    availableMetrics: list[str] | None = None
     pollingIntervalMinutes: int | None = Field(None, ge=1, le=1440)
     isEnabled: bool | None = None
 
@@ -85,6 +90,7 @@ class ConnectorResponse(BaseModel):
     authType: str
     authConfig: dict  # secrets masked
     responseMapping: dict | None
+    availableMetrics: list[str] | None
     pollingIntervalMinutes: int
     isEnabled: bool
     lastPolledAt: str | None

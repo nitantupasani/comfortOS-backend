@@ -100,6 +100,7 @@ async def create_connector(
         auth_type=body.authType,
         auth_config=body.authConfig,
         response_mapping=body.responseMapping,
+        available_metrics=body.availableMetrics,
         polling_interval_minutes=body.pollingIntervalMinutes,
         is_enabled=body.isEnabled,
     )
@@ -143,6 +144,7 @@ async def update_connector(
         "authType": "auth_type",
         "authConfig": "auth_config",
         "responseMapping": "response_mapping",
+        "availableMetrics": "available_metrics",
         "pollingIntervalMinutes": "polling_interval_minutes",
         "isEnabled": "is_enabled",
     }
