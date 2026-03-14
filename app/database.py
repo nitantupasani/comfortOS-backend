@@ -11,9 +11,11 @@ from sqlalchemy.orm import DeclarativeBase
 
 from .config import settings
 
-# Supabase (and most managed PostgreSQL providers) require SSL.
-# asyncpg accepts an ssl context via connect_args.
+# Supabase Session Pooler uses SSL with a self-signed intermediate cert.
+# We require SSL but skip hostname/cert verification.
 _ssl_context = ssl.create_default_context()
+_ssl_context.check_hostname = False
+_ssl_context.verify_mode = ssl.CERT_NONE
 engine = create_async_engine(
     settings.database_url,
     echo=False,
