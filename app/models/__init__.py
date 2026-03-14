@@ -12,6 +12,7 @@ from .notification import PushToken
 from .audit import AuditLog
 from .connector_registry import ConnectorDefinition, DatasetDefinition
 from .fm_request import FMRoleRequest, FMRequestStatus
+from .telemetry import TelemetryReading
 
 __all__ = [
     "Tenant",
@@ -30,4 +31,5 @@ __all__ = [
     "DatasetDefinition",
     "FMRoleRequest",
     "FMRequestStatus",
+    "TelemetryReading",
 ]

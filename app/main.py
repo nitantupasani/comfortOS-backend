@@ -40,6 +40,7 @@ from .models import (  # noqa: F401
     DatasetDefinition,
     FMRoleRequest,
     FMRequestStatus,
+    TelemetryReading,
 )
 
 # API routers
@@ -50,6 +51,7 @@ from .api.votes import router as votes_router
 from .api.presence import router as presence_router
 from .api.datasets import router as datasets_router
 from .api.fm_requests import router as fm_requests_router
+from .api.telemetry import router as telemetry_router
 
 
 @asynccontextmanager
@@ -91,6 +93,7 @@ app.include_router(votes_router)
 app.include_router(presence_router)
 app.include_router(datasets_router)
 app.include_router(fm_requests_router)
+app.include_router(telemetry_router)
 
 
 @app.get("/health")
