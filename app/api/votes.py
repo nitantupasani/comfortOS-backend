@@ -79,37 +79,41 @@ async def submit_vote(
 
     # Access check
     if building.requires_access_permission:
-        has_access = False
+        # Admins and building FMs always have access
+        if user.role in (UserRole.admin, UserRole.building_facility_manager):
+            pass  # always allowed
+        else:
+            has_access = False
 
-        # Check tenant-based access
-        if user.tenant_id:
-            bt_check = await db.execute(
-                select(BuildingTenant).where(
-                    BuildingTenant.building_id == body.buildingId,
-                    BuildingTenant.tenant_id == user.tenant_id,
-                    BuildingTenant.is_active == True,  # noqa: E712
+            # Check tenant-based access
+            if user.tenant_id:
+                bt_check = await db.execute(
+                    select(BuildingTenant).where(
+                        BuildingTenant.building_id == body.buildingId,
+                        BuildingTenant.tenant_id == user.tenant_id,
+                        BuildingTenant.is_active == True,  # noqa: E712
+                    )
                 )
-            )
-            if bt_check.scalar_one_or_none() is not None:
-                has_access = True
+                if bt_check.scalar_one_or_none() is not None:
+                    has_access = True
 
-        # Check explicit access grant
-        if not has_access:
-            uba_check = await db.execute(
-                select(UserBuildingAccess).where(
-                    UserBuildingAccess.user_id == user.id,
-                    UserBuildingAccess.building_id == body.buildingId,
-                    UserBuildingAccess.is_active == True,  # noqa: E712
+            # Check explicit access grant
+            if not has_access:
+                uba_check = await db.execute(
+                    select(UserBuildingAccess).where(
+                        UserBuildingAccess.user_id == user.id,
+                        UserBuildingAccess.building_id == body.buildingId,
+                        UserBuildingAccess.is_active == True,  # noqa: E712
+                    )
                 )
-            )
-            if uba_check.scalar_one_or_none() is not None:
-                has_access = True
+                if uba_check.scalar_one_or_none() is not None:
+                    has_access = True
 
-        if not has_access:
-            raise HTTPException(
-                status_code=403,
-                detail="This building requires access permission",
-            )
+            if not has_access:
+                raise HTTPException(
+                    status_code=403,
+                    detail="This building requires access permission",
+                )
 
     # Per-user daily vote rate limit
     await _check_daily_vote_limit(user.id, body.buildingId, db)
@@ -122,7 +126,7 @@ async def submit_vote(
         payload=body.payload,
         schema_version=body.schemaVersion,
         status=VoteStatus.confirmed,
-        created_at=datetime.fromisoformat(body.createdAt)
+        created_at=datetime.fromisoformat(body.createdAt.replace("Z", "+00:00"))
         if body.createdAt
         else datetime.now(timezone.utc),
     )
