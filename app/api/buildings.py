@@ -104,12 +104,8 @@ async def list_buildings(
             result = await db.execute(select(Building))
             return [b.to_api_dict() for b in result.scalars().all()]
 
-        if user.role == UserRole.building_facility_manager:
-            # Building FM manages all buildings
-            result = await db.execute(select(Building))
-            return [b.to_api_dict() for b in result.scalars().all()]
-
-        # tenant_facility_manager / occupant: only tenant-mapped + explicitly granted
+        # building_facility_manager / tenant_facility_manager / occupant:
+        # only tenant-mapped + explicitly granted
         accessible_ids: list[str] = []
         if user.tenant_id:
             bt_result = await db.execute(
@@ -143,7 +139,7 @@ async def list_buildings(
     )
 
     # --- 2. Restricted buildings the user may access ---
-    if user.role in (UserRole.admin, UserRole.building_facility_manager):
+    if user.role == UserRole.admin:
         restricted_stmt = select(Building).where(
             Building.requires_access_permission == True  # noqa: E712
         )
@@ -179,7 +175,7 @@ async def list_buildings(
 
     # Optional tenant filter narrows restricted buildings
     if tenantId:
-        if user.role not in (UserRole.admin, UserRole.building_facility_manager):
+        if user.role != UserRole.admin:
             if user.tenant_id and user.tenant_id != tenantId:
                 raise HTTPException(status_code=403, detail="Tenant isolation violation")
         restricted_stmt = (
@@ -288,7 +284,7 @@ async def _get_accessible_building(
         return building
 
     # Restricted building → check roles / tenant mapping / explicit grants
-    if user.role in (UserRole.admin, UserRole.building_facility_manager):
+    if user.role == UserRole.admin:
         return building
 
     # Check tenant-based access
