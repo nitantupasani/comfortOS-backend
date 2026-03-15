@@ -13,6 +13,7 @@ Query (frontend reads aggregated time-series):
 from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Header
+import sqlalchemy as sa
 from sqlalchemy import select, func, distinct, case, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -171,50 +172,98 @@ async def query_telemetry_series(
         dt_to = datetime.now(timezone.utc)
         dt_from = dt_to - timedelta(days=7)
 
-    # Build base query
+    # Shared filter conditions
+    conditions = [
+        TelemetryReading.building_id == building_id,
+        TelemetryReading.metric_type == metricType,
+    ]
+    if dt_from:
+        conditions.append(TelemetryReading.recorded_at >= dt_from)
+    if dt_to:
+        conditions.append(TelemetryReading.recorded_at < dt_to)
+    if floor:
+        conditions.append(TelemetryReading.floor == floor)
+    if zone:
+        conditions.append(TelemetryReading.zone == zone)
+
+    # ── Aggregated path: push GROUP BY into SQL to avoid row-limit ──
+    if granularity in ("hourly", "daily"):
+        trunc = "hour" if granularity == "hourly" else "day"
+        agg_stmt = (
+            select(
+                func.date_trunc(trunc, TelemetryReading.recorded_at).label("bucket"),
+                TelemetryReading.floor,
+                TelemetryReading.zone,
+                func.round(func.avg(TelemetryReading.value).cast(sa.Numeric), 2).label("avg_val"),
+                func.min(TelemetryReading.unit).label("unit"),
+            )
+            .where(*conditions)
+            .group_by(
+                text("1"),  # bucket
+                TelemetryReading.floor,
+                TelemetryReading.zone,
+            )
+            .order_by(text("1"))
+        )
+        result = await db.execute(agg_stmt)
+        rows = result.all()  # (bucket, floor, zone, avg_val, unit)
+
+        unit = rows[0].unit if rows else ""
+
+        groups: dict[str, list[tuple]] = {}
+        for r in rows:
+            key = _group_key(r.floor, r.zone)
+            groups.setdefault(key, []).append(r)
+
+        series: list[TelemetrySeriesGroup] = []
+        for key, grp in sorted(groups.items()):
+            floor_val = grp[0].floor
+            zone_val = grp[0].zone
+            points = [
+                TelemetryPoint(
+                    recordedAt=r.bucket.isoformat() + "+00:00",
+                    value=float(r.avg_val),
+                    floor=floor_val,
+                    zone=zone_val,
+                )
+                for r in grp
+            ]
+            series.append(TelemetrySeriesGroup(
+                label=key, floor=floor_val, zone=zone_val, points=points,
+            ))
+
+        return TelemetryQueryResponse(
+            buildingId=building_id,
+            metricType=metricType,
+            unit=unit,
+            granularity=granularity,
+            series=series,
+        )
+
+    # ── Raw path: keep limit to prevent OOM ──
     stmt = (
         select(TelemetryReading)
-        .where(
-            TelemetryReading.building_id == building_id,
-            TelemetryReading.metric_type == metricType,
-        )
+        .where(*conditions)
         .order_by(TelemetryReading.recorded_at)
+        .limit(50_000)
     )
-    if dt_from:
-        stmt = stmt.where(TelemetryReading.recorded_at >= dt_from)
-    if dt_to:
-        stmt = stmt.where(TelemetryReading.recorded_at < dt_to)
-    if floor:
-        stmt = stmt.where(TelemetryReading.floor == floor)
-    if zone:
-        stmt = stmt.where(TelemetryReading.zone == zone)
-
-    # Limit raw readings to prevent OOM
-    stmt = stmt.limit(50_000)
-
     result = await db.execute(stmt)
     readings = result.scalars().all()
 
-    # Determine unit from first reading
     unit = readings[0].unit if readings else ""
 
-    # Group by floor+zone
-    groups: dict[str, list[TelemetryReading]] = {}
+    groups_raw: dict[str, list[TelemetryReading]] = {}
     for r in readings:
         key = _group_key(r.floor, r.zone)
-        groups.setdefault(key, []).append(r)
+        groups_raw.setdefault(key, []).append(r)
 
-    # Build response series (apply granularity aggregation)
-    series: list[TelemetrySeriesGroup] = []
-    for key, group_readings in sorted(groups.items()):
+    series = []
+    for key, group_readings in sorted(groups_raw.items()):
         floor_val = group_readings[0].floor
         zone_val = group_readings[0].zone
-        points = _aggregate(group_readings, granularity)
+        points = _aggregate(group_readings, "raw")
         series.append(TelemetrySeriesGroup(
-            label=key,
-            floor=floor_val,
-            zone=zone_val,
-            points=points,
+            label=key, floor=floor_val, zone=zone_val, points=points,
         ))
 
     return TelemetryQueryResponse(
