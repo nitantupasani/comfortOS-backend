@@ -221,7 +221,7 @@ async def query_telemetry_series(
             zone_val = grp[0].zone
             points = [
                 TelemetryPoint(
-                    recordedAt=r.bucket.isoformat() + "+00:00",
+                    recordedAt=r.bucket.strftime("%Y-%m-%dT%H:%M:%S+00:00"),
                     value=float(r.avg_val),
                     floor=floor_val,
                     zone=zone_val,
