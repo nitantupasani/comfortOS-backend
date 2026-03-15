@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
 from ..api.deps import get_current_user
+from ..api.buildings import _get_accessible_building
 from ..models.user import User, UserRole
 from ..models.vote import Vote as VoteModel, VoteStatus
 from ..models.building import Building
@@ -182,13 +183,8 @@ async def get_vote_analytics(
     ):
         raise HTTPException(status_code=403, detail="Analytics requires FM or admin role")
 
-    # Verify building exists
-    building_result = await db.execute(
-        select(Building).where(Building.id == buildingId)
-    )
-    building = building_result.scalar_one_or_none()
-    if building is None:
-        raise HTTPException(status_code=404, detail="Building not found")
+    # Verify building exists AND user has access
+    building = await _get_accessible_building(buildingId, user, db)
 
     # Build query
     query = select(VoteModel).where(VoteModel.building_id == buildingId)

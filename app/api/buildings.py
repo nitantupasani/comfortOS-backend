@@ -75,6 +75,7 @@ def _thermal_comfort_to_score(value: int | float) -> float | None:
 @router.get("")
 async def list_buildings(
     tenantId: str | None = Query(None, description="Optional tenant filter"),
+    managedOnly: bool = Query(False, description="When true, only return buildings the caller manages (tenant-mapped or explicitly granted). Used by FM pages."),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -90,7 +91,52 @@ async def list_buildings(
 
     When ``tenantId`` is supplied the response is filtered to buildings that
     tenant occupies (still including open buildings).
+
+    When ``managedOnly`` is true (for FM management pages), only buildings
+    the user has a management relationship with are returned — open buildings
+    not mapped to the user's tenant are excluded.
     """
+
+    # When managedOnly is set, return only buildings the FM actually manages
+    if managedOnly:
+        if user.role == UserRole.admin:
+            # Admin manages all buildings
+            result = await db.execute(select(Building))
+            return [b.to_api_dict() for b in result.scalars().all()]
+
+        if user.role == UserRole.building_facility_manager:
+            # Building FM manages all buildings
+            result = await db.execute(select(Building))
+            return [b.to_api_dict() for b in result.scalars().all()]
+
+        # tenant_facility_manager / occupant: only tenant-mapped + explicitly granted
+        accessible_ids: list[str] = []
+        if user.tenant_id:
+            bt_result = await db.execute(
+                select(BuildingTenant.building_id).where(
+                    BuildingTenant.tenant_id == user.tenant_id,
+                    BuildingTenant.is_active == True,  # noqa: E712
+                )
+            )
+            accessible_ids.extend(r[0] for r in bt_result.all())
+
+        uba_result = await db.execute(
+            select(UserBuildingAccess.building_id).where(
+                UserBuildingAccess.user_id == user.id,
+                UserBuildingAccess.is_active == True,  # noqa: E712
+            )
+        )
+        accessible_ids.extend(r[0] for r in uba_result.all())
+
+        if not accessible_ids:
+            return []
+
+        unique_ids = list(set(accessible_ids))
+        result = await db.execute(
+            select(Building).where(Building.id.in_(unique_ids))
+        )
+        return [b.to_api_dict() for b in result.scalars().all()]
+
     # --- 1. Open buildings (everyone can see) ---
     open_stmt = select(Building).where(
         Building.requires_access_permission == False  # noqa: E712
@@ -366,10 +412,8 @@ async def update_building_config(
     if user.role not in _FM_ROLES:
         raise HTTPException(status_code=403, detail="Facility manager or admin only")
 
-    # Verify building exists
-    result = await db.execute(select(Building).where(Building.id == building_id))
-    if result.scalar_one_or_none() is None:
-        raise HTTPException(status_code=404, detail="Building not found")
+    # Verify building exists AND the caller has access
+    await _get_accessible_building(building_id, user, db)
 
     config = await _get_active_config(building_id, db)
     if config is None:

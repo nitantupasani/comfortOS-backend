@@ -1,9 +1,10 @@
 """
 FM Role Request API routes.
 
-    POST   /fm-requests            → Submit a request (any authenticated user)
-    GET    /fm-requests            → List requests (admin: all, user: own)
-    PUT    /fm-requests/{id}/review → Admin approves or rejects
+    POST   /fm-requests              → Submit a request (any authenticated user)
+    GET    /fm-requests              → List requests (admin: all, user: own)
+    PUT    /fm-requests/{id}/review  → Admin approves or rejects
+    PUT    /fm-requests/{id}/revoke  → Admin revokes approved FM access
 """
 
 from datetime import datetime, timezone
@@ -54,18 +55,17 @@ async def create_fm_request(
     if building is None:
         raise HTTPException(status_code=404, detail="Building not found")
 
-    # Check for existing pending request for same user+building
+    # Enforce single pending request at a time (any building)
     existing = await db.execute(
         select(FMRoleRequest).where(
             FMRoleRequest.user_id == user.id,
-            FMRoleRequest.building_id == body.buildingId,
             FMRoleRequest.status == FMRequestStatus.pending,
         )
     )
     if existing.scalar_one_or_none() is not None:
         raise HTTPException(
             status_code=409,
-            detail="You already have a pending FM request for this building",
+            detail="You already have a pending FM request. Only one pending request is allowed at a time.",
         )
 
     # Validate role requested
@@ -162,6 +162,70 @@ async def review_fm_request(
                 db.add(access)
     else:
         req.status = FMRequestStatus.rejected
+
+    await db.commit()
+    await db.refresh(req)
+    return _to_response(req)
+
+
+@router.put("/{request_id}/revoke", response_model=FMRequestResponse)
+async def revoke_fm_access(
+    request_id: str,
+    user: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin revokes a previously approved FM request — demotes user back to occupant."""
+    result = await db.execute(
+        select(FMRoleRequest).where(FMRoleRequest.id == request_id)
+    )
+    req = result.scalar_one_or_none()
+    if req is None:
+        raise HTTPException(status_code=404, detail="FM request not found")
+
+    if req.status != FMRequestStatus.approved:
+        raise HTTPException(status_code=400, detail="Only approved requests can be revoked")
+
+    now = datetime.now(timezone.utc)
+    req.status = FMRequestStatus.rejected
+    req.reviewed_by = user.id
+    req.review_note = "Access revoked by admin"
+    req.reviewed_at = now
+
+    # Demote the user back to occupant
+    target_result = await db.execute(
+        select(User).where(User.id == req.user_id)
+    )
+    target_user = target_result.scalar_one_or_none()
+    if target_user:
+        # Only demote if user has no other approved FM requests
+        other_approved = await db.execute(
+            select(FMRoleRequest).where(
+                FMRoleRequest.user_id == req.user_id,
+                FMRoleRequest.id != req.id,
+                FMRoleRequest.status == FMRequestStatus.approved,
+            )
+        )
+        if other_approved.scalar_one_or_none() is None:
+            target_user.role = UserRole.occupant
+            claims = dict(target_user.claims or {})
+            scopes = claims.get("scopes", [])
+            for s in ["manage_building", "view_analytics"]:
+                if s in scopes:
+                    scopes.remove(s)
+            claims["scopes"] = scopes
+            target_user.claims = claims
+
+    # Deactivate building access grant
+    access_result = await db.execute(
+        select(UserBuildingAccess).where(
+            UserBuildingAccess.user_id == req.user_id,
+            UserBuildingAccess.building_id == req.building_id,
+            UserBuildingAccess.is_active == True,  # noqa: E712
+        )
+    )
+    access = access_result.scalar_one_or_none()
+    if access:
+        access.is_active = False
 
     await db.commit()
     await db.refresh(req)

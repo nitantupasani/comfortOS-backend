@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
 from ..api.deps import get_current_user
+from ..api.buildings import _get_accessible_building
 from ..models.user import User, UserRole
 from ..models.building import Building
 from ..models.building_connector import BuildingConnector
@@ -43,12 +44,25 @@ _VALID_AUTH_TYPES = {
 }
 
 
-async def _verify_building(building_id: str, db: AsyncSession) -> Building:
-    result = await db.execute(select(Building).where(Building.id == building_id))
-    building = result.scalar_one_or_none()
-    if building is None:
-        raise HTTPException(status_code=404, detail="Building not found")
-    return building
+async def _verify_building_access(
+    building_id: str, user: User, db: AsyncSession
+) -> Building:
+    """Verify building exists AND user has access to it."""
+    return await _get_accessible_building(building_id, user, db)
+
+
+async def _verify_connector_access(
+    connector_id: str, user: User, db: AsyncSession
+) -> BuildingConnector:
+    """Load connector and verify user has access to its building."""
+    result = await db.execute(
+        select(BuildingConnector).where(BuildingConnector.id == connector_id)
+    )
+    connector = result.scalar_one_or_none()
+    if connector is None:
+        raise HTTPException(status_code=404, detail="Connector not found")
+    await _verify_building_access(connector.building_id, user, db)
+    return connector
 
 
 @router.get("/{building_id}")
@@ -61,7 +75,7 @@ async def list_connectors(
     if user.role not in _ADMIN_FM_ROLES:
         raise HTTPException(status_code=403, detail="Admin or FM only")
 
-    await _verify_building(building_id, db)
+    await _verify_building_access(building_id, user, db)
 
     result = await db.execute(
         select(BuildingConnector)
@@ -81,7 +95,7 @@ async def create_connector(
     if user.role not in _ADMIN_FM_ROLES:
         raise HTTPException(status_code=403, detail="Admin or FM only")
 
-    await _verify_building(body.buildingId, db)
+    await _verify_building_access(body.buildingId, user, db)
 
     if body.authType not in _VALID_AUTH_TYPES:
         raise HTTPException(
@@ -121,12 +135,7 @@ async def update_connector(
     if user.role not in _ADMIN_FM_ROLES:
         raise HTTPException(status_code=403, detail="Admin or FM only")
 
-    result = await db.execute(
-        select(BuildingConnector).where(BuildingConnector.id == connector_id)
-    )
-    connector = result.scalar_one_or_none()
-    if connector is None:
-        raise HTTPException(status_code=404, detail="Connector not found")
+    connector = await _verify_connector_access(connector_id, user, db)
 
     if body.authType is not None and body.authType not in _VALID_AUTH_TYPES:
         raise HTTPException(
@@ -174,12 +183,7 @@ async def delete_connector(
     if user.role not in _ADMIN_FM_ROLES:
         raise HTTPException(status_code=403, detail="Admin or FM only")
 
-    result = await db.execute(
-        select(BuildingConnector).where(BuildingConnector.id == connector_id)
-    )
-    connector = result.scalar_one_or_none()
-    if connector is None:
-        raise HTTPException(status_code=404, detail="Connector not found")
+    connector = await _verify_connector_access(connector_id, user, db)
 
     await db.delete(connector)
     await db.commit()
@@ -195,12 +199,7 @@ async def test_connector(
     if user.role not in _ADMIN_FM_ROLES:
         raise HTTPException(status_code=403, detail="Admin or FM only")
 
-    result = await db.execute(
-        select(BuildingConnector).where(BuildingConnector.id == connector_id)
-    )
-    connector = result.scalar_one_or_none()
-    if connector is None:
-        raise HTTPException(status_code=404, detail="Connector not found")
+    connector = await _verify_connector_access(connector_id, user, db)
 
     from ..services.telemetry_poller import poll_single_connector
     test_result = await poll_single_connector(connector, db, dry_run=True)
@@ -217,12 +216,7 @@ async def poll_now(
     if user.role not in _ADMIN_FM_ROLES:
         raise HTTPException(status_code=403, detail="Admin or FM only")
 
-    result = await db.execute(
-        select(BuildingConnector).where(BuildingConnector.id == connector_id)
-    )
-    connector = result.scalar_one_or_none()
-    if connector is None:
-        raise HTTPException(status_code=404, detail="Connector not found")
+    connector = await _verify_connector_access(connector_id, user, db)
 
     from ..services.telemetry_poller import poll_single_connector
     poll_result = await poll_single_connector(connector, db, dry_run=False)
