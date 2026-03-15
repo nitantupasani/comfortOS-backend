@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from sqlalchemy import String, Integer, DateTime, ForeignKey, JSON, Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 import enum
+from typing import Optional
 
 from ..database import Base
 
@@ -27,8 +28,8 @@ class Vote(Base):
     building_id: Mapped[str] = mapped_column(
         String(50), ForeignKey("buildings.id"), nullable=False, index=True
     )
-    user_id: Mapped[str] = mapped_column(
-        String(50), ForeignKey("users.id"), nullable=False, index=True
+    user_id: Mapped[Optional[str]] = mapped_column(
+        String(50), ForeignKey("users.id"), nullable=True, index=True
     )
     payload: Mapped[dict] = mapped_column(JSON, nullable=False)
     schema_version: Mapped[int] = mapped_column(Integer, default=1)

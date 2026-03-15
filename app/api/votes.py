@@ -8,7 +8,7 @@ Vote Ingestion API routes.
 
 from datetime import datetime, timezone, timedelta, date
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Header
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +19,7 @@ from ..models.vote import Vote as VoteModel, VoteStatus
 from ..models.building import Building
 from ..models.building_tenant import BuildingTenant
 from ..models.user_building_access import UserBuildingAccess
+from ..models.building_config import BuildingConfig
 from ..schemas.vote import VoteSubmitRequest, VoteSubmitResponse
 
 router = APIRouter(prefix="/votes", tags=["votes"])
@@ -218,3 +219,90 @@ async def get_vote_analytics(
         "totalVotes": len(votes),
         "votes": [v.to_api_dict() for v in votes],
     }
+
+
+# ── Bulk anonymous vote ingest (building-service API-key auth) ────────────
+
+async def _get_building_api_key(building_id: str, db: AsyncSession) -> str | None:
+    result = await db.execute(
+        select(BuildingConfig)
+        .where(
+            BuildingConfig.building_id == building_id,
+            BuildingConfig.is_active == True,  # noqa: E712
+        )
+        .order_by(BuildingConfig.created_at.desc())
+        .limit(1)
+    )
+    config = result.scalar_one_or_none()
+    if config and config.dashboard_layout and isinstance(config.dashboard_layout, dict):
+        return config.dashboard_layout.get("telemetryApiKey")
+    return None
+
+
+from pydantic import BaseModel
+from typing import List
+
+
+class AnonymousVote(BaseModel):
+    voteUuid: str
+    thermalComfort: int
+    createdAt: str
+
+
+class AnonymousVoteBatchRequest(BaseModel):
+    buildingId: str
+    votes: List[AnonymousVote]
+
+
+class AnonymousVoteBatchResponse(BaseModel):
+    accepted: int
+    skipped: int
+
+
+@router.post("/ingest", response_model=AnonymousVoteBatchResponse)
+async def ingest_anonymous_votes(
+    body: AnonymousVoteBatchRequest,
+    x_api_key: str = Header(..., alias="X-Api-Key"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Bulk-ingest anonymous comfort votes from a building service.
+
+    Uses the same per-building telemetry API key for authentication.
+    Votes are stored without a user_id (anonymous).
+    """
+    # Verify building
+    result = await db.execute(select(Building).where(Building.id == body.buildingId))
+    building = result.scalar_one_or_none()
+    if not building:
+        raise HTTPException(status_code=404, detail="Building not found")
+
+    # API key check
+    expected_key = await _get_building_api_key(body.buildingId, db)
+    if not expected_key:
+        raise HTTPException(status_code=403, detail="Telemetry API key not configured")
+    if x_api_key != expected_key:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+    accepted = 0
+    skipped = 0
+    for v in body.votes:
+        existing = await db.execute(
+            select(VoteModel.vote_uuid).where(VoteModel.vote_uuid == v.voteUuid)
+        )
+        if existing.scalar_one_or_none() is not None:
+            skipped += 1
+            continue
+        vote = VoteModel(
+            vote_uuid=v.voteUuid,
+            building_id=body.buildingId,
+            user_id=None,
+            payload={"thermal_comfort": v.thermalComfort},
+            schema_version=1,
+            status=VoteStatus.confirmed,
+            created_at=datetime.fromisoformat(v.createdAt.replace("Z", "+00:00")),
+        )
+        db.add(vote)
+        accepted += 1
+
+    await db.flush()
+    return AnonymousVoteBatchResponse(accepted=accepted, skipped=skipped)
