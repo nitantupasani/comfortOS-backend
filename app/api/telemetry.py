@@ -278,6 +278,11 @@ async def get_latest_readings(
 
 def _group_key(floor: str | None, zone: str | None) -> str:
     """Stable display label for a floor+zone pair."""
+    # Omit generic/placeholder floor values — just show zone
+    generic_floors = {"0", "ground", "default", "-", ""}
+    floor_is_generic = not floor or floor.strip().lower() in generic_floors
+    if floor_is_generic and zone:
+        return zone
     if floor and zone:
         return f"{floor} / {zone}"
     if floor:
