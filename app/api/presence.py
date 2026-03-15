@@ -24,7 +24,10 @@ from ..models.user_building_access import UserBuildingAccess
 from ..schemas.presence import (
     PresenceEventRequest,
     PushTokenRegisterRequest,
+    SendNotificationRequest,
+    SendNotificationResponse,
 )
+from ..services.notification_service import send_to_users, send_broadcast
 
 router = APIRouter(tags=["presence & notifications"])
 
@@ -170,19 +173,32 @@ async def register_push_token(
     return {"status": "ok"}
 
 
-@router.post("/notifications/send")
+@router.post("/notifications/send", response_model=SendNotificationResponse)
 async def send_notification(
-    body: dict,
+    body: SendNotificationRequest,
     user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    """Send a push notification (admin/manager only).
+    """Send a push notification via FCM/APNs (admin/manager only).
 
-    In production this would dispatch to FCM/APNs via the Push Provider.
+    - If ``userIds`` is provided, sends to those specific users.
+    - If ``userIds`` is omitted, broadcasts to all registered devices.
     """
     if user.role.value not in (
         "tenant_facility_manager", "building_facility_manager", "admin"
     ):
         raise HTTPException(status_code=403, detail="Insufficient role")
 
-    # TODO: Integrate with FCM/APNs Push Provider
-    return {"status": "queued", "detail": "Push provider integration pending"}
+    if body.userIds:
+        result = await send_to_users(
+            db, body.userIds, body.title, body.body, body.data
+        )
+    else:
+        result = await send_broadcast(db, body.title, body.body, body.data)
+
+    return SendNotificationResponse(
+        status="sent",
+        sent=result["sent"],
+        failed=result["failed"],
+        detail=result.get("detail"),
+    )

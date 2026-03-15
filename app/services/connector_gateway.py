@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from ..models.connector_registry import ConnectorDefinition, DatasetDefinition
+from .secrets import resolve_secret
 
 
 def _is_ssrf_blocked(url: str) -> bool:
@@ -101,16 +102,22 @@ async def read_dataset(
     if connector is None:
         return None
 
-    # Step 3: Resolve secrets (placeholder)
-    # In production: fetch from Vault / KMS using connector.secret_ref
+    # Step 3: Resolve secrets via Secrets Manager abstraction
     auth_headers: dict[str, str] = {}
-    if connector.auth_type == "oauth2" and connector.secret_ref:
-        # Would fetch OAuth token from Secrets Manager and token endpoint
-        pass
-    elif connector.auth_type == "hmac" and connector.secret_ref:
-        # Would compute HMAC signature
-        pass
-    # mTLS would be configured at the httpx client level
+    if connector.secret_ref:
+        secret_value = resolve_secret(connector.secret_ref)
+        if connector.auth_type == "bearer" and secret_value:
+            auth_headers["Authorization"] = f"Bearer {secret_value}"
+        elif connector.auth_type == "api_key" and secret_value:
+            auth_headers["X-Api-Key"] = secret_value
+        elif connector.auth_type == "oauth2" and secret_value:
+            # secret_value = client_secret; full OAuth token exchange
+            # would go here in production (token endpoint + caching)
+            auth_headers["Authorization"] = f"Bearer {secret_value}"
+        elif connector.auth_type == "hmac":
+            # HMAC signing would use secret_value to compute signature
+            pass
+        # mTLS is configured at the httpx client level (cert= kwarg)
 
     # Step 4: Build URL with SSRF defenses
     url = f"{connector.base_url.rstrip('/')}/{dataset.endpoint_path.lstrip('/')}"
