@@ -37,8 +37,9 @@ def upgrade() -> None:
     op.execute(
         sa.text(
             "INSERT INTO building_configs (id, building_id, schema_version, dashboard_layout, is_active, created_at, updated_at) "
-            "VALUES (:id, :building_id, :schema_version, :dashboard_layout::jsonb, :is_active, NOW(), NOW())"
+            "VALUES (:id, :building_id, :schema_version, CAST(:dashboard_layout AS jsonb), :is_active, NOW(), NOW())"
         ).bindparams(
+            sa.bindparam("dashboard_layout", type_=sa.Text),
             id=CONFIG_ID,
             building_id=BUILDING_ID,
             schema_version=1,
