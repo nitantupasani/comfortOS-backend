@@ -172,6 +172,11 @@ async def query_telemetry_series(
         dt_to = datetime.now(timezone.utc)
         dt_from = dt_to - timedelta(days=7)
 
+    # Cap at current time — never show future-dated readings
+    now = datetime.now(timezone.utc)
+    if dt_to is None or dt_to > now:
+        dt_to = now
+
     # Shared filter conditions
     conditions = [
         TelemetryReading.building_id == building_id,
@@ -285,6 +290,8 @@ async def get_latest_readings(
     await _verify_building_exists(building_id, db)
 
     # Subquery: max recorded_at per (metric_type, floor, zone)
+    # Cap at current time so future-dated readings are hidden
+    now = datetime.now(timezone.utc)
     subq = (
         select(
             TelemetryReading.metric_type,
@@ -292,7 +299,10 @@ async def get_latest_readings(
             TelemetryReading.zone,
             func.max(TelemetryReading.recorded_at).label("max_ts"),
         )
-        .where(TelemetryReading.building_id == building_id)
+        .where(
+            TelemetryReading.building_id == building_id,
+            TelemetryReading.recorded_at <= now,
+        )
         .group_by(
             TelemetryReading.metric_type,
             TelemetryReading.floor,
