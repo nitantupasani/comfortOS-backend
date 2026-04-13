@@ -281,12 +281,20 @@ async def ingest_anonymous_votes(
 
     accepted = 0
     skipped = 0
+    updated = 0
     for v in body.votes:
-        existing = await db.execute(
-            select(VoteModel.vote_uuid).where(VoteModel.vote_uuid == v.voteUuid)
+        existing_result = await db.execute(
+            select(VoteModel).where(VoteModel.vote_uuid == v.voteUuid)
         )
-        if existing.scalar_one_or_none() is not None:
-            skipped += 1
+        existing_vote = existing_result.scalar_one_or_none()
+        new_ts = datetime.fromisoformat(v.createdAt.replace("Z", "+00:00"))
+        if existing_vote is not None:
+            # Update timestamp if it changed
+            if existing_vote.created_at != new_ts:
+                existing_vote.created_at = new_ts
+                updated += 1
+            else:
+                skipped += 1
             continue
         vote = VoteModel(
             vote_uuid=v.voteUuid,
@@ -295,10 +303,10 @@ async def ingest_anonymous_votes(
             payload={"thermal_comfort": v.thermalComfort},
             schema_version=1,
             status=VoteStatus.confirmed,
-            created_at=datetime.fromisoformat(v.createdAt.replace("Z", "+00:00")),
+            created_at=new_ts,
         )
         db.add(vote)
         accepted += 1
 
     await db.flush()
-    return AnonymousVoteBatchResponse(accepted=accepted, skipped=skipped)
+    return AnonymousVoteBatchResponse(accepted=accepted + updated, skipped=skipped)
