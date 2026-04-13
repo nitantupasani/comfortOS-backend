@@ -167,6 +167,7 @@ async def get_vote_analytics(
     buildingId: str = Query(..., description="Building ID"),
     dateFrom: str | None = Query(None, description="Start date (ISO format)"),
     dateTo: str | None = Query(None, description="End date (ISO format)"),
+    zone: str | None = Query(None, description="Filter by zone/room name"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -204,6 +205,10 @@ async def get_vote_analytics(
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid dateTo format")
         query = query.where(VoteModel.created_at <= dt_to)
+
+    if zone:
+        # Filter votes whose JSON payload contains matching zone
+        query = query.where(VoteModel.payload["zone"].as_string() == zone)
 
     query = query.order_by(VoteModel.created_at.desc()).limit(10000)
     result = await db.execute(query)
@@ -243,6 +248,7 @@ class AnonymousVote(BaseModel):
     voteUuid: str
     thermalComfort: int
     createdAt: str
+    zone: str | None = None
 
 
 class AnonymousVoteBatchRequest(BaseModel):
@@ -288,10 +294,17 @@ async def ingest_anonymous_votes(
         )
         existing_vote = existing_result.scalar_one_or_none()
         new_ts = datetime.fromisoformat(v.createdAt.replace("Z", "+00:00"))
+        new_payload = {"thermal_comfort": v.thermalComfort, **({"zone": v.zone} if v.zone else {})}
         if existing_vote is not None:
-            # Update timestamp if it changed
+            # Update timestamp and payload if changed
+            changed = False
             if existing_vote.created_at != new_ts:
                 existing_vote.created_at = new_ts
+                changed = True
+            if existing_vote.payload != new_payload:
+                existing_vote.payload = new_payload
+                changed = True
+            if changed:
                 updated += 1
             else:
                 skipped += 1
@@ -300,7 +313,7 @@ async def ingest_anonymous_votes(
             vote_uuid=v.voteUuid,
             building_id=body.buildingId,
             user_id=None,
-            payload={"thermal_comfort": v.thermalComfort},
+            payload=new_payload,
             schema_version=1,
             status=VoteStatus.confirmed,
             created_at=new_ts,
