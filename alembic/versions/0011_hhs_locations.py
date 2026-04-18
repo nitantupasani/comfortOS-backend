@@ -71,7 +71,7 @@ def upgrade() -> None:
         loc_id = f"loc-hhs-{zone_code}"
         conn.execute(sa.text(
             "INSERT INTO locations (id, building_id, parent_id, type, name, code, sort_order, external_refs, created_at, updated_at) "
-            "VALUES (:id, :bid, NULL, 'room', :name, :code, :sort, :refs, NOW(), NOW()) "
+            "VALUES (:id, :bid, NULL, 'room', :name, :code, :sort, CAST(:refs AS json), NOW(), NOW()) "
             "ON CONFLICT (id) DO NOTHING"
         ).bindparams(
             id=loc_id, bid=BUILDING_ID,
