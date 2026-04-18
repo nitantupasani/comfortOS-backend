@@ -1,20 +1,27 @@
 """
-Telemetry API — building sensor data ingestion & query.
+Telemetry API -- sensor data ingestion and query.
 
 Ingestion (building services push data):
-    POST /telemetry/ingest  → Batch-push sensor readings (API-key auth)
+    POST /telemetry/ingest  -> Batch-push sensor readings (API-key auth)
 
 Query (frontend reads aggregated time-series):
-    GET  /telemetry/{building_id}/series  → Time-series by metric type
-    GET  /telemetry/{building_id}/latest  → Latest reading per floor/zone
-    GET  /telemetry/{building_id}/metrics → Available metric types
+    GET  /telemetry/{building_id}/series  -> Time-series by metric type
+    GET  /telemetry/{building_id}/latest  -> Latest reading per location
+    GET  /telemetry/{building_id}/metrics -> Available metric types
+    GET  /telemetry/{building_id}/room-summary -> Aggregated room-level values
+
+Config:
+    GET  /telemetry/{building_id}/config       -> List metric configs
+    POST /telemetry/{building_id}/config       -> Create/update metric config
 """
 
 from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Header
+import re
+
 import sqlalchemy as sa
-from sqlalchemy import select, func, distinct, case, text
+from sqlalchemy import select, func, distinct, text, case, literal_column
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
@@ -23,23 +30,28 @@ from ..models.user import User, UserRole
 from ..models.building import Building
 from ..models.building_config import BuildingConfig
 from ..models.telemetry import TelemetryReading
+from ..models.location import Location
+from ..models.building_telemetry_config import BuildingTelemetryConfig
 from ..schemas.telemetry import (
     TelemetryBatchRequest,
     TelemetryBatchResponse,
     TelemetryQueryResponse,
     TelemetrySeriesGroup,
     TelemetryPoint,
+    TelemetryRoomSummary,
+    BuildingTelemetryConfigIn,
 )
+from ..services.ingestion import ingestion_service
 
 router = APIRouter(prefix="/telemetry", tags=["telemetry"])
 
-# Maximum batch size enforced at ingestion
 _MAX_BATCH = 1000
+_ADMIN_FM = (UserRole.admin, UserRole.building_facility_manager, UserRole.tenant_facility_manager)
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────
+# -- Helpers ---------------------------------------------------------------
 
-async def _verify_building_exists(building_id: str, db: AsyncSession) -> Building:
+async def _verify_building(building_id: str, db: AsyncSession) -> Building:
     result = await db.execute(select(Building).where(Building.id == building_id))
     building = result.scalar_one_or_none()
     if building is None:
@@ -48,17 +60,9 @@ async def _verify_building_exists(building_id: str, db: AsyncSession) -> Buildin
 
 
 async def _get_building_api_key(building_id: str, db: AsyncSession) -> str | None:
-    """Retrieve the telemetry API key from the building config metadata.
-
-    Building admins set the key in the building config under:
-      buildingConfig.telemetryApiKey
-    """
     result = await db.execute(
         select(BuildingConfig)
-        .where(
-            BuildingConfig.building_id == building_id,
-            BuildingConfig.is_active == True,  # noqa: E712
-        )
+        .where(BuildingConfig.building_id == building_id, BuildingConfig.is_active == True)  # noqa: E712
         .order_by(BuildingConfig.created_at.desc())
         .limit(1)
     )
@@ -68,63 +72,54 @@ async def _get_building_api_key(building_id: str, db: AsyncSession) -> str | Non
     return None
 
 
-# ── Ingestion endpoint ────────────────────────────────────────────────────
+# -- Ingestion -------------------------------------------------------------
 
 @router.post("/ingest", response_model=TelemetryBatchResponse)
 async def ingest_telemetry(
     body: TelemetryBatchRequest,
-    x_api_key: str = Header(..., alias="X-Api-Key", description="Building service API key"),
+    x_api_key: str = Header(..., alias="X-Api-Key"),
     db: AsyncSession = Depends(get_db),
 ):
     """Batch-ingest sensor readings from a building service.
 
-    Authentication is via a per-building API key set in the building
-    configuration by the admin/FM.  This keeps building-service
-    integrations decoupled from user authentication.
+    Uses the normalized ingestion pipeline.  All readings pass through
+    location resolution, sensor resolution, unit inference, range
+    validation, and quality flagging before storage.
     """
-    building = await _verify_building_exists(body.buildingId, db)
+    await _verify_building(body.buildingId, db)
 
-    # Validate API key
     expected_key = await _get_building_api_key(body.buildingId, db)
     if not expected_key:
         raise HTTPException(
             status_code=403,
-            detail="Telemetry ingestion not configured for this building. "
-                   "Set telemetryApiKey in the building dashboard config.",
+            detail="Telemetry ingestion not configured. Set telemetryApiKey in building config.",
         )
     if x_api_key != expected_key:
         raise HTTPException(status_code=401, detail="Invalid API key")
 
-    # Insert readings
-    rows = []
-    for r in body.readings[:_MAX_BATCH]:
-        rows.append(TelemetryReading(
-            building_id=body.buildingId,
-            metric_type=r.metricType,
-            value=r.value,
-            unit=r.unit,
-            floor=r.floor,
-            zone=r.zone,
-            recorded_at=r.recordedAt,
-            metadata_=r.metadata,
-        ))
-    db.add_all(rows)
-    await db.commit()
+    accepted, rejected, errors = await ingestion_service.normalize_and_store(
+        db=db,
+        building_id=body.buildingId,
+        readings=body.readings[:_MAX_BATCH],
+    )
 
-    return TelemetryBatchResponse(accepted=len(rows), buildingId=body.buildingId)
+    return TelemetryBatchResponse(
+        accepted=accepted,
+        rejected=rejected,
+        buildingId=body.buildingId,
+        errors=errors,
+    )
 
 
-# ── Query endpoints ──────────────────────────────────────────────────────
+# -- Query: metrics --------------------------------------------------------
 
 @router.get("/{building_id}/metrics")
-async def list_available_metrics(
+async def list_metrics(
     building_id: str,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """List distinct metric types available for a building."""
-    await _verify_building_exists(building_id, db)
-
+    await _verify_building(building_id, db)
     result = await db.execute(
         select(
             distinct(TelemetryReading.metric_type),
@@ -133,119 +128,170 @@ async def list_available_metrics(
         .where(TelemetryReading.building_id == building_id)
         .group_by(TelemetryReading.metric_type)
     )
-    return [
-        {"metricType": row[0], "unit": row[1] or ""}
-        for row in result.all()
-    ]
+    return [{"metricType": row[0], "unit": row[1] or ""} for row in result.all()]
 
+
+# -- Query: grouping levels ------------------------------------------------
+
+@router.get("/{building_id}/grouping-levels")
+async def get_grouping_levels(
+    building_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return which grouping levels are available for this building.
+
+    Analyzes the building's existing telemetry data to determine which
+    hierarchy levels (room, floor, wing) are meaningful for grouping.
+
+    HHS (all on floor "0"):        returns [room]
+    Building 28 (multi-floor/wing): returns [room, floor, wing]
+    """
+    await _verify_building(building_id, db)
+
+    # Get distinct floor and zone values
+    result = await db.execute(
+        select(
+            distinct(TelemetryReading.floor),
+        )
+        .where(
+            TelemetryReading.building_id == building_id,
+            TelemetryReading.floor.isnot(None),
+        )
+    )
+    floors = [r[0] for r in result.all() if r[0]]
+
+    result = await db.execute(
+        select(
+            distinct(TelemetryReading.zone),
+        )
+        .where(
+            TelemetryReading.building_id == building_id,
+            TelemetryReading.zone.isnot(None),
+        )
+    )
+    zones = [r[0] for r in result.all() if r[0]]
+
+    levels = [{"key": "room", "label": "Room / Zone"}]
+
+    # Floor is meaningful if there are multiple distinct floor values
+    # or if the single floor is not "0" (which is a placeholder)
+    meaningful_floors = [f for f in floors if f not in ("0", "", "default")]
+    if len(meaningful_floors) > 1:
+        levels.append({"key": "floor", "label": "Floor"})
+
+    # Wing is available if zones follow the pattern "{floor}-{wing}-{room}"
+    wing_pattern = re.compile(r"^\d+-([A-Za-z]+)-\d+$")
+    wings = set()
+    for z in zones:
+        m = wing_pattern.match(z)
+        if m:
+            wings.add(m.group(1))
+    if len(wings) > 1:
+        levels.append({"key": "wing", "label": "Wing"})
+
+    return {
+        "buildingId": building_id,
+        "levels": levels,
+        "floors": sorted(meaningful_floors),
+        "wings": sorted(wings) if wings else [],
+        "roomCount": len(zones),
+    }
+
+
+# -- Query: time-series ----------------------------------------------------
 
 @router.get("/{building_id}/series", response_model=TelemetryQueryResponse)
-async def query_telemetry_series(
+async def query_series(
     building_id: str,
-    metricType: str = Query(..., description="temperature, co2, noise, humidity"),
-    dateFrom: str | None = Query(None, description="ISO date (inclusive)"),
-    dateTo: str | None = Query(None, description="ISO date (inclusive)"),
+    metricType: str = Query(...),
+    dateFrom: str | None = Query(None),
+    dateTo: str | None = Query(None),
     granularity: str = Query("hourly", description="raw | hourly | daily"),
-    floor: str | None = Query(None, description="Filter to specific floor"),
-    zone: str | None = Query(None, description="Filter to specific zone"),
+    groupBy: str = Query("room", description="room | floor | wing"),
+    locationId: str | None = Query(None, description="Filter to specific location"),
+    # Legacy params
+    floor: str | None = Query(None),
+    zone: str | None = Query(None),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Query time-series sensor data, optionally aggregated.
 
-    Groups results by floor/zone.  If no floor/zone filters are set,
-    returns one series per distinct floor (or one "Building" series if
-    data has no floor labels).
+    groupBy controls how series are grouped:
+      - room (default): one series per floor/zone combo
+      - floor: one series per floor, averaging across zones
+      - wing: one series per wing (extracted from zone pattern "{floor}-{wing}-{room}")
     """
-    await _verify_building_exists(building_id, db)
+    await _verify_building(building_id, db)
 
-    # Parse dates
-    dt_from = None
-    dt_to = None
-    if dateFrom:
-        dt_from = datetime.fromisoformat(dateFrom).replace(tzinfo=timezone.utc)
-    if dateTo:
-        dt_to = (datetime.fromisoformat(dateTo) + timedelta(days=1)).replace(tzinfo=timezone.utc)
+    dt_from, dt_to = _parse_date_range(dateFrom, dateTo)
 
-    # Default to last 7 days
-    if dt_from is None and dt_to is None:
-        dt_to = datetime.now(timezone.utc)
-        dt_from = dt_to - timedelta(days=7)
-
-    # Cap at current time — never show future-dated readings
-    now = datetime.now(timezone.utc)
-    if dt_to is None or dt_to > now:
-        dt_to = now
-
-    # Shared filter conditions
     conditions = [
         TelemetryReading.building_id == building_id,
         TelemetryReading.metric_type == metricType,
+        TelemetryReading.recorded_at >= dt_from,
+        TelemetryReading.recorded_at < dt_to,
     ]
-    if dt_from:
-        conditions.append(TelemetryReading.recorded_at >= dt_from)
-    if dt_to:
-        conditions.append(TelemetryReading.recorded_at < dt_to)
+    if locationId:
+        conditions.append(TelemetryReading.location_id == locationId)
     if floor:
         conditions.append(TelemetryReading.floor == floor)
     if zone:
         conditions.append(TelemetryReading.zone == zone)
 
-    # ── Aggregated path: push GROUP BY into SQL to avoid row-limit ──
     if granularity in ("hourly", "daily"):
         trunc = "hour" if granularity == "hourly" else "day"
-        agg_stmt = (
-            select(
-                func.date_trunc(trunc, TelemetryReading.recorded_at).label("bucket"),
-                TelemetryReading.floor,
-                TelemetryReading.zone,
-                func.round(func.avg(TelemetryReading.value).cast(sa.Numeric), 2).label("avg_val"),
-                func.min(TelemetryReading.unit).label("unit"),
-            )
-            .where(*conditions)
-            .group_by(
-                text("1"),  # bucket
-                TelemetryReading.floor,
-                TelemetryReading.zone,
-            )
-            .order_by(text("1"))
-        )
-        result = await db.execute(agg_stmt)
-        rows = result.all()  # (bucket, floor, zone, avg_val, unit)
 
-        unit = rows[0].unit if rows else ""
+        # Determine grouping columns based on groupBy parameter
+        if groupBy == "floor":
+            group_cols = [TelemetryReading.floor]
+            label_expr = TelemetryReading.floor
+        elif groupBy == "wing":
+            # Extract wing letter from zone pattern like "1-W-560" using SQL
+            # split_part(zone, '-', 2) extracts the wing part
+            wing_expr = func.split_part(TelemetryReading.zone, '-', 2)
+            group_cols = [wing_expr]
+            label_expr = wing_expr
+        else:
+            # Default: group by room (floor + zone)
+            group_cols = [TelemetryReading.floor, TelemetryReading.zone]
+            label_expr = None  # handled in response builder
 
-        groups: dict[str, list[tuple]] = {}
-        for r in rows:
-            key = _group_key(r.floor, r.zone)
-            groups.setdefault(key, []).append(r)
-
-        series: list[TelemetrySeriesGroup] = []
-        for key, grp in sorted(groups.items()):
-            floor_val = grp[0].floor
-            zone_val = grp[0].zone
-            points = [
-                TelemetryPoint(
-                    recordedAt=r.bucket.strftime("%Y-%m-%dT%H:%M:%S+00:00"),
-                    value=float(r.avg_val),
-                    floor=floor_val,
-                    zone=zone_val,
+        if groupBy in ("floor", "wing"):
+            stmt = (
+                select(
+                    func.date_trunc(trunc, TelemetryReading.recorded_at).label("bucket"),
+                    label_expr.label("group_key"),
+                    func.round(func.avg(TelemetryReading.value).cast(sa.Numeric), 2).label("avg_val"),
+                    func.min(TelemetryReading.unit).label("unit"),
                 )
-                for r in grp
-            ]
-            series.append(TelemetrySeriesGroup(
-                label=key, floor=floor_val, zone=zone_val, points=points,
-            ))
+                .where(*conditions)
+                .group_by(text("1"), text("2"))
+                .order_by(text("1"))
+            )
+            result = await db.execute(stmt)
+            rows = result.all()
+            return _build_grouped_series_response(building_id, metricType, granularity, groupBy, rows)
+        else:
+            stmt = (
+                select(
+                    func.date_trunc(trunc, TelemetryReading.recorded_at).label("bucket"),
+                    TelemetryReading.location_id,
+                    TelemetryReading.floor,
+                    TelemetryReading.zone,
+                    func.round(func.avg(TelemetryReading.value).cast(sa.Numeric), 2).label("avg_val"),
+                    func.min(TelemetryReading.unit).label("unit"),
+                )
+                .where(*conditions)
+                .group_by(text("1"), TelemetryReading.location_id, TelemetryReading.floor, TelemetryReading.zone)
+                .order_by(text("1"))
+            )
+            result = await db.execute(stmt)
+            rows = result.all()
+            return _build_series_response(building_id, metricType, granularity, rows, aggregated=True)
 
-        return TelemetryQueryResponse(
-            buildingId=building_id,
-            metricType=metricType,
-            unit=unit,
-            granularity=granularity,
-            series=series,
-        )
-
-    # ── Raw path: keep limit to prevent OOM ──
+    # Raw
     stmt = (
         select(TelemetryReading)
         .where(*conditions)
@@ -254,60 +300,32 @@ async def query_telemetry_series(
     )
     result = await db.execute(stmt)
     readings = result.scalars().all()
+    return _build_raw_response(building_id, metricType, readings, groupBy=groupBy)
 
-    unit = readings[0].unit if readings else ""
 
-    groups_raw: dict[str, list[TelemetryReading]] = {}
-    for r in readings:
-        key = _group_key(r.floor, r.zone)
-        groups_raw.setdefault(key, []).append(r)
-
-    series = []
-    for key, group_readings in sorted(groups_raw.items()):
-        floor_val = group_readings[0].floor
-        zone_val = group_readings[0].zone
-        points = _aggregate(group_readings, "raw")
-        series.append(TelemetrySeriesGroup(
-            label=key, floor=floor_val, zone=zone_val, points=points,
-        ))
-
-    return TelemetryQueryResponse(
-        buildingId=building_id,
-        metricType=metricType,
-        unit=unit,
-        granularity=granularity,
-        series=series,
-    )
-
+# -- Query: latest ---------------------------------------------------------
 
 @router.get("/{building_id}/latest")
-async def get_latest_readings(
+async def get_latest(
     building_id: str,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get the most recent reading per metric type per floor/zone."""
-    await _verify_building_exists(building_id, db)
-
-    # Subquery: max recorded_at per (metric_type, floor, zone)
-    # Cap at current time so future-dated readings are hidden
+    """Get the most recent reading per metric type per location."""
+    await _verify_building(building_id, db)
     now = datetime.now(timezone.utc)
+
     subq = (
         select(
             TelemetryReading.metric_type,
-            TelemetryReading.floor,
-            TelemetryReading.zone,
+            TelemetryReading.location_id,
             func.max(TelemetryReading.recorded_at).label("max_ts"),
         )
         .where(
             TelemetryReading.building_id == building_id,
             TelemetryReading.recorded_at <= now,
         )
-        .group_by(
-            TelemetryReading.metric_type,
-            TelemetryReading.floor,
-            TelemetryReading.zone,
-        )
+        .group_by(TelemetryReading.metric_type, TelemetryReading.location_id)
         .subquery()
     )
 
@@ -317,70 +335,356 @@ async def get_latest_readings(
             subq,
             (TelemetryReading.metric_type == subq.c.metric_type)
             & (
-                (TelemetryReading.floor == subq.c.floor)
-                | (TelemetryReading.floor.is_(None) & subq.c.floor.is_(None))
-            )
-            & (
-                (TelemetryReading.zone == subq.c.zone)
-                | (TelemetryReading.zone.is_(None) & subq.c.zone.is_(None))
+                (TelemetryReading.location_id == subq.c.location_id)
+                | (TelemetryReading.location_id.is_(None) & subq.c.location_id.is_(None))
             )
             & (TelemetryReading.recorded_at == subq.c.max_ts),
         )
         .where(TelemetryReading.building_id == building_id)
     )
-
     result = await db.execute(stmt)
     return [r.to_api_dict() for r in result.scalars().all()]
 
 
-# ── Aggregation helpers ───────────────────────────────────────────────────
+# -- Query: room summary --------------------------------------------------
 
-def _group_key(floor: str | None, zone: str | None) -> str:
-    """Stable display label for a floor+zone pair."""
-    # Omit generic/placeholder floor values — just show zone
-    generic_floors = {"0", "ground", "default", "-", ""}
-    floor_is_generic = not floor or floor.strip().lower() in generic_floors
-    if floor_is_generic and zone:
-        return zone
-    if floor and zone:
-        return f"{floor} / {zone}"
-    if floor:
-        return floor
-    if zone:
-        return zone
-    return "Building"
+@router.get("/{building_id}/room-summary")
+async def room_summary(
+    building_id: str,
+    metricType: str = Query(...),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get aggregated room-level values for a metric type.
+
+    Applies the building's room_aggregation_rule to produce one value
+    per room from all sensors in that room.
+    """
+    await _verify_building(building_id, db)
+
+    # Load config
+    config_result = await db.execute(
+        select(BuildingTelemetryConfig)
+        .where(
+            BuildingTelemetryConfig.building_id == building_id,
+            BuildingTelemetryConfig.metric_type == metricType,
+        )
+    )
+    config = config_result.scalar_one_or_none()
+    agg_rule = config.room_aggregation_rule if config else "avg"
+    stale_minutes = config.stale_threshold_minutes if config else None
+
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(hours=24)
+
+    # Get latest readings per location
+    stmt = (
+        select(
+            TelemetryReading.location_id,
+            func.round(func.avg(TelemetryReading.value).cast(sa.Numeric), 2).label("avg_val"),
+            func.min(TelemetryReading.value).label("min_val"),
+            func.max(TelemetryReading.value).label("max_val"),
+            func.max(TelemetryReading.recorded_at).label("latest_ts"),
+            func.min(TelemetryReading.unit).label("unit"),
+            func.count().label("sensor_count"),
+        )
+        .where(
+            TelemetryReading.building_id == building_id,
+            TelemetryReading.metric_type == metricType,
+            TelemetryReading.recorded_at >= cutoff,
+            TelemetryReading.location_id.isnot(None),
+            TelemetryReading.quality_flag.in_(["good", "suspect"]),
+        )
+        .group_by(TelemetryReading.location_id)
+    )
+    result = await db.execute(stmt)
+    rows = result.all()
+
+    # Load location names
+    loc_ids = [r.location_id for r in rows if r.location_id]
+    loc_names = {}
+    loc_types = {}
+    if loc_ids:
+        loc_result = await db.execute(
+            select(Location.id, Location.name, Location.type)
+            .where(Location.id.in_(loc_ids))
+        )
+        for lid, lname, ltype in loc_result.all():
+            loc_names[lid] = lname
+            loc_types[lid] = ltype
+
+    summaries = []
+    for r in rows:
+        # Pick value based on aggregation rule
+        if agg_rule == "min":
+            value = float(r.min_val)
+        elif agg_rule == "max":
+            value = float(r.max_val)
+        else:
+            value = float(r.avg_val)
+
+        is_stale = False
+        if stale_minutes and r.latest_ts:
+            is_stale = r.latest_ts < now - timedelta(minutes=stale_minutes)
+
+        summaries.append(TelemetryRoomSummary(
+            locationId=r.location_id,
+            locationName=loc_names.get(r.location_id, ""),
+            locationType=loc_types.get(r.location_id, ""),
+            metricType=metricType,
+            value=value,
+            unit=r.unit or "",
+            recordedAt=r.latest_ts.isoformat() if r.latest_ts else "",
+            aggregationMethod=agg_rule,
+            sensorCount=r.sensor_count,
+            qualityFlag="good",
+            isStale=is_stale,
+        ))
+
+    return summaries
 
 
-def _aggregate(
-    readings: list[TelemetryReading],
-    granularity: str,
-) -> list[TelemetryPoint]:
-    """Bucket readings by time and return averaged points."""
-    if granularity == "raw" or len(readings) <= 1:
-        return [
+# -- Config ----------------------------------------------------------------
+
+@router.get("/{building_id}/config")
+async def list_telemetry_config(
+    building_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await _verify_building(building_id, db)
+    result = await db.execute(
+        select(BuildingTelemetryConfig)
+        .where(BuildingTelemetryConfig.building_id == building_id)
+    )
+    return [c.to_api_dict() for c in result.scalars().all()]
+
+
+@router.post("/{building_id}/config", status_code=201)
+async def upsert_telemetry_config(
+    building_id: str,
+    body: BuildingTelemetryConfigIn,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if user.role not in _ADMIN_FM:
+        raise HTTPException(status_code=403, detail="Admin or FM only")
+
+    await _verify_building(building_id, db)
+
+    # Upsert
+    result = await db.execute(
+        select(BuildingTelemetryConfig)
+        .where(
+            BuildingTelemetryConfig.building_id == building_id,
+            BuildingTelemetryConfig.metric_type == body.metricType,
+        )
+    )
+    config = result.scalar_one_or_none()
+
+    if config:
+        config.is_enabled = body.isEnabled
+        config.default_unit = body.defaultUnit
+        config.source_level = body.sourceLevel
+        config.room_aggregation_rule = body.roomAggregationRule
+        config.preferred_sensor_id = body.preferredSensorId
+        config.valid_range_min = body.validRangeMin
+        config.valid_range_max = body.validRangeMax
+        config.stale_threshold_minutes = body.staleThresholdMinutes
+        config.conflict_resolution = body.conflictResolution
+        config.connector_priority = body.connectorPriority
+        config.metadata_ = body.metadata
+    else:
+        config = BuildingTelemetryConfig(
+            building_id=building_id,
+            metric_type=body.metricType,
+            is_enabled=body.isEnabled,
+            default_unit=body.defaultUnit,
+            source_level=body.sourceLevel,
+            room_aggregation_rule=body.roomAggregationRule,
+            preferred_sensor_id=body.preferredSensorId,
+            valid_range_min=body.validRangeMin,
+            valid_range_max=body.validRangeMax,
+            stale_threshold_minutes=body.staleThresholdMinutes,
+            conflict_resolution=body.conflictResolution,
+            connector_priority=body.connectorPriority,
+            metadata_=body.metadata,
+        )
+        db.add(config)
+
+    await db.flush()
+    await db.refresh(config)
+    return config.to_api_dict()
+
+
+# -- Helpers ---------------------------------------------------------------
+
+def _parse_date_range(
+    date_from: str | None, date_to: str | None,
+) -> tuple[datetime, datetime]:
+    dt_from = None
+    dt_to = None
+    if date_from:
+        dt_from = datetime.fromisoformat(date_from).replace(tzinfo=timezone.utc)
+    if date_to:
+        dt_to = (datetime.fromisoformat(date_to) + timedelta(days=1)).replace(tzinfo=timezone.utc)
+    if dt_from is None and dt_to is None:
+        dt_to = datetime.now(timezone.utc)
+        dt_from = dt_to - timedelta(days=7)
+    elif dt_from is None:
+        dt_from = dt_to - timedelta(days=7)
+    elif dt_to is None:
+        dt_to = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc)
+    if dt_to > now:
+        dt_to = now
+    return dt_from, dt_to
+
+
+def _extract_wing(zone: str | None) -> str:
+    """Extract wing letter from zone pattern like '1-W-560' -> 'W'."""
+    if not zone:
+        return "Unknown"
+    parts = zone.split("-")
+    if len(parts) >= 2 and parts[1].isalpha():
+        return f"Wing {parts[1]}"
+    return zone
+
+
+def _group_key_for(r, groupBy: str) -> str:
+    """Compute grouping key for a raw reading based on groupBy level."""
+    if groupBy == "floor":
+        return f"Floor {r.floor}" if r.floor and r.floor not in ("0", "") else "Building"
+    elif groupBy == "wing":
+        return _extract_wing(r.zone)
+    else:
+        # room level: use existing label logic
+        floor = r.floor
+        zone = r.zone
+        generic_floors = {"0", "ground", "default", "-", ""}
+        floor_is_generic = not floor or floor.strip().lower() in generic_floors
+        if floor_is_generic and zone:
+            return zone
+        if floor and zone:
+            return f"{floor} / {zone}"
+        if floor:
+            return floor
+        if zone:
+            return zone
+        return "Building"
+
+
+def _build_grouped_series_response(
+    building_id: str, metric_type: str, granularity: str, group_by: str, rows,
+) -> TelemetryQueryResponse:
+    """Build response for floor-level or wing-level grouping."""
+    unit = rows[0].unit if rows else ""
+    groups: dict[str, list] = {}
+    for r in rows:
+        key = r.group_key or "Unknown"
+        if group_by == "floor":
+            key = f"Floor {key}" if key not in ("0", "") else "Building"
+        elif group_by == "wing":
+            key = f"Wing {key}" if key and key != "" else "Unknown"
+        groups.setdefault(key, []).append(r)
+
+    series = []
+    for key, grp in sorted(groups.items()):
+        points = [
             TelemetryPoint(
-                recordedAt=r.recorded_at.isoformat(),
-                value=round(r.value, 2),
+                recordedAt=r.bucket.strftime("%Y-%m-%dT%H:%M:%S+00:00"),
+                value=float(r.avg_val),
+            )
+            for r in grp
+        ]
+        series.append(TelemetrySeriesGroup(
+            label=key,
+            points=points,
+        ))
+
+    return TelemetryQueryResponse(
+        buildingId=building_id,
+        metricType=metric_type,
+        unit=unit,
+        granularity=granularity,
+        series=series,
+    )
+
+
+def _build_series_response(
+    building_id: str, metric_type: str, granularity: str, rows, aggregated: bool,
+) -> TelemetryQueryResponse:
+    unit = rows[0].unit if rows else ""
+    groups: dict[str, list] = {}
+    for r in rows:
+        key = r.location_id or r.floor or r.zone or "Building"
+        groups.setdefault(key, []).append(r)
+
+    series = []
+    for key, grp in sorted(groups.items()):
+        points = [
+            TelemetryPoint(
+                recordedAt=r.bucket.strftime("%Y-%m-%dT%H:%M:%S+00:00"),
+                value=float(r.avg_val),
+                locationId=r.location_id,
                 floor=r.floor,
                 zone=r.zone,
             )
-            for r in readings
+            for r in grp
         ]
+        series.append(TelemetrySeriesGroup(
+            label=key,
+            locationId=grp[0].location_id,
+            floor=grp[0].floor,
+            zone=grp[0].zone,
+            points=points,
+        ))
 
-    # Bucket by hour or day
-    bucket_fmt = "%Y-%m-%dT%H:00:00" if granularity == "hourly" else "%Y-%m-%d"
-    buckets: dict[str, list[float]] = {}
-    first_reading = readings[0]
+    return TelemetryQueryResponse(
+        buildingId=building_id,
+        metricType=metric_type,
+        unit=unit,
+        granularity=granularity,
+        series=series,
+    )
+
+
+def _build_raw_response(
+    building_id: str, metric_type: str, readings: list[TelemetryReading],
+    groupBy: str = "room",
+) -> TelemetryQueryResponse:
+    unit = readings[0].unit if readings else ""
+    groups: dict[str, list[TelemetryReading]] = {}
     for r in readings:
-        key = r.recorded_at.strftime(bucket_fmt)
-        buckets.setdefault(key, []).append(r.value)
+        key = _group_key_for(r, groupBy)
+        groups.setdefault(key, []).append(r)
 
-    return [
-        TelemetryPoint(
-            recordedAt=ts + ("+00:00" if "T" in ts else "T00:00:00+00:00"),
-            value=round(sum(vals) / len(vals), 2),
-            floor=first_reading.floor,
-            zone=first_reading.zone,
-        )
-        for ts, vals in sorted(buckets.items())
-    ]
+    series = []
+    for key, grp in sorted(groups.items()):
+        points = [
+            TelemetryPoint(
+                recordedAt=r.recorded_at.isoformat(),
+                value=round(r.value, 2),
+                locationId=r.location_id,
+                sensorId=r.sensor_id,
+                qualityFlag=r.quality_flag,
+                floor=r.floor,
+                zone=r.zone,
+            )
+            for r in grp
+        ]
+        series.append(TelemetrySeriesGroup(
+            label=key,
+            locationId=grp[0].location_id,
+            floor=grp[0].floor,
+            zone=grp[0].zone,
+            points=points,
+        ))
+
+    return TelemetryQueryResponse(
+        buildingId=building_id,
+        metricType=metric_type,
+        unit=unit,
+        granularity="raw",
+        series=series,
+    )

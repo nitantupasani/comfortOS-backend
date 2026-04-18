@@ -1,10 +1,11 @@
-"""Building telemetry — time-series sensor data ingested from building services.
+"""Telemetry Reading -- unified time-series storage for all metrics.
 
-Stores per-reading environmental measurements (temperature, CO2, noise,
-humidity, etc.) keyed by building, metric type, and optional zone/floor.
+One table for all metric types (temperature, co2, relative_humidity, noise,
+and any future metrics).  No per-metric tables or per-metric logic.
 
-Building service connectors push data via the Telemetry Ingestion API.
-The frontend queries aggregated time-series for the Building Analytics page.
+Replaces the legacy free-text floor/zone columns with proper foreign keys
+to the locations and sensors tables.  Legacy columns are kept temporarily
+for backward compatibility during migration.
 """
 
 import uuid
@@ -18,53 +19,37 @@ from sqlalchemy import (
     Index,
     JSON,
 )
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..database import Base
 
 
 class TelemetryReading(Base):
-    """A single time-stamped sensor reading from a building service.
-
-    Metric types
-    ------------
-    - ``temperature``  — degrees Celsius
-    - ``co2``          — parts per million (ppm)
-    - ``noise``        — decibels (dBA)
-    - ``humidity``     — percent (%)
-
-    Custom metric types are also accepted; the frontend renders any
-    metric it recognises and ignores the rest.
-
-    Spatial granularity
-    -------------------
-    ``floor`` and ``zone`` are optional free-text labels.  A reading
-    with both NULL means "whole building".  The building developer
-    decides what granularity to report.
-    """
-
     __tablename__ = "telemetry_readings"
 
     id: Mapped[str] = mapped_column(
-        String(50), primary_key=True, default=lambda: f"tr-{uuid.uuid4().hex[:12]}"
+        String(50), primary_key=True,
+        default=lambda: f"tr-{uuid.uuid4().hex[:12]}",
     )
     building_id: Mapped[str] = mapped_column(
-        String(50), ForeignKey("buildings.id"), nullable=False
+        String(50), ForeignKey("buildings.id"), nullable=False,
+    )
+    location_id: Mapped[str | None] = mapped_column(
+        String(50), ForeignKey("locations.id"), nullable=True,
+        comment="Resolved room or placement location",
+    )
+    sensor_id: Mapped[str | None] = mapped_column(
+        String(50), ForeignKey("sensors.sensor_id"), nullable=True,
+        comment="Resolved sensor, NULL for room/zone-level source data",
     )
     metric_type: Mapped[str] = mapped_column(
         String(50), nullable=False,
-        comment="temperature | co2 | noise | humidity | custom",
+        comment="temperature | co2 | relative_humidity | noise | custom",
     )
     value: Mapped[float] = mapped_column(Float, nullable=False)
     unit: Mapped[str] = mapped_column(
         String(20), nullable=False, default="",
-        comment="°C, ppm, dBA, %, etc.",
-    )
-    floor: Mapped[str | None] = mapped_column(
-        String(100), nullable=True, comment="Floor label (optional)"
-    )
-    zone: Mapped[str | None] = mapped_column(
-        String(100), nullable=True, comment="Zone label (optional)"
+        comment="C, ppm, %, dBA, etc.",
     )
     recorded_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False,
@@ -75,17 +60,56 @@ class TelemetryReading(Base):
         default=lambda: datetime.now(timezone.utc),
         comment="When the platform received this reading",
     )
+    source_level: Mapped[str | None] = mapped_column(
+        String(20), nullable=True,
+        comment="sensor | placement | room | zone | building",
+    )
+    aggregation_method: Mapped[str | None] = mapped_column(
+        String(20), nullable=True, default="raw",
+        comment="raw | avg | min | max | median",
+    )
+    quality_flag: Mapped[str | None] = mapped_column(
+        String(20), nullable=True, default="good",
+        comment="good | suspect | missing | stale | out_of_range",
+    )
+    connector_id: Mapped[str | None] = mapped_column(
+        String(50), nullable=True,
+        comment="Which endpoint provided this reading",
+    )
     metadata_: Mapped[dict | None] = mapped_column(
         "metadata", JSON, nullable=True,
-        comment="Arbitrary extra context (sensor_id, device, etc.)",
     )
 
-    # ── Composite indexes for typical query patterns ──
+    # Legacy columns kept for backward compatibility during migration
+    floor: Mapped[str | None] = mapped_column(
+        String(100), nullable=True, comment="LEGACY: Floor label",
+    )
+    zone: Mapped[str | None] = mapped_column(
+        String(100), nullable=True, comment="LEGACY: Zone label",
+    )
+
+    # Relationships
+    location = relationship("Location", lazy="noload")
+    sensor = relationship("Sensor", lazy="noload")
+
     __table_args__ = (
         Index(
             "ix_telemetry_building_metric_time",
             "building_id", "metric_type", "recorded_at",
         ),
+        Index(
+            "ix_telemetry_location_metric_time",
+            "location_id", "metric_type", "recorded_at",
+        ),
+        Index(
+            "ix_telemetry_sensor_time",
+            "sensor_id", "recorded_at",
+        ),
+        Index(
+            "ix_telemetry_building_location_time",
+            "building_id", "location_id", "recorded_at",
+        ),
+        # Legacy index kept during migration
         Index(
             "ix_telemetry_building_floor_time",
             "building_id", "floor", "recorded_at",
@@ -96,12 +120,19 @@ class TelemetryReading(Base):
         return {
             "id": self.id,
             "buildingId": self.building_id,
+            "locationId": self.location_id,
+            "sensorId": self.sensor_id,
             "metricType": self.metric_type,
             "value": self.value,
             "unit": self.unit,
-            "floor": self.floor,
-            "zone": self.zone,
             "recordedAt": self.recorded_at.isoformat(),
             "ingestedAt": self.ingested_at.isoformat(),
+            "sourceLevel": self.source_level,
+            "aggregationMethod": self.aggregation_method,
+            "qualityFlag": self.quality_flag,
+            "connectorId": self.connector_id,
             "metadata": self.metadata_,
+            # Legacy fields
+            "floor": self.floor,
+            "zone": self.zone,
         }

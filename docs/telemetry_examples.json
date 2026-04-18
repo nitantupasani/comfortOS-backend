@@ -1,0 +1,255 @@
+{
+  "_description": "Example payloads for all telemetry endpoint modes and the normalized output format.",
+
+  "push_mode_simplest_payload": {
+    "_description": "Minimum viable push payload. Four fields per reading.",
+    "request": {
+      "method": "POST",
+      "url": "/telemetry/ingest",
+      "headers": {"X-Api-Key": "building-api-key"},
+      "body": {
+        "buildingId": "bldg-demo",
+        "readings": [
+          {"metricType": "temperature", "value": 22.5, "recordedAt": "2026-04-18T10:30:00Z", "locationRef": "Room 1.01"},
+          {"metricType": "co2", "value": 680, "recordedAt": "2026-04-18T10:30:00Z", "locationRef": "Room 1.01"},
+          {"metricType": "relative_humidity", "value": 45.2, "recordedAt": "2026-04-18T10:30:00Z", "locationRef": "Room 1.01"},
+          {"metricType": "noise", "value": 42.0, "recordedAt": "2026-04-18T10:30:00Z", "locationRef": "Room 1.01"}
+        ]
+      }
+    },
+    "response": {
+      "accepted": 4,
+      "rejected": 0,
+      "buildingId": "bldg-demo",
+      "errors": []
+    }
+  },
+
+  "push_mode_full_payload": {
+    "_description": "Push payload with all optional fields included.",
+    "body": {
+      "buildingId": "bldg-demo",
+      "readings": [
+        {
+          "metricType": "temperature",
+          "value": 22.1,
+          "unit": "C",
+          "recordedAt": "2026-04-18T10:30:00Z",
+          "locationRef": "NW-101",
+          "sensorRef": "DEMO-NW101-TEMP-A",
+          "sourceLevel": "sensor",
+          "aggregationMethod": "raw",
+          "qualityFlag": "good",
+          "metadata": {"firmware": "v2.1.0"}
+        }
+      ]
+    }
+  },
+
+  "pull_mode_case_a_single_zone": {
+    "_description": "Source response from a single-zone endpoint. All readings go to default_location_id.",
+    "endpoint_config": {
+      "endpointMode": "single_zone",
+      "defaultLocationId": "loc-rm101",
+      "locationMapping": {"strategy": "fixed"}
+    },
+    "source_response": {
+      "readings": [
+        {"metric": "temperature", "value": 22.3, "time": "2026-04-18T10:30:00Z"},
+        {"metric": "relative_humidity", "value": 45.0, "time": "2026-04-18T10:30:00Z"}
+      ]
+    }
+  },
+
+  "pull_mode_case_b_multi_zone": {
+    "_description": "Source response from a multi-zone endpoint. Each reading contains a zone identifier.",
+    "endpoint_config": {
+      "endpointMode": "multi_zone",
+      "locationMapping": {
+        "strategy": "field_match",
+        "source_field": "zone_code",
+        "match_target": "external_refs.bms_zone"
+      }
+    },
+    "source_response": {
+      "data": {
+        "measurements": [
+          {"type": "temp", "val": 22.1, "unit": "C", "ts": "2026-04-18T10:30:00Z", "zone_id": "NW-101"},
+          {"type": "temp", "val": 21.8, "unit": "C", "ts": "2026-04-18T10:30:00Z", "zone_id": "NW-102"},
+          {"type": "carbon_dioxide", "val": 680, "unit": "ppm", "ts": "2026-04-18T10:30:00Z", "zone_id": "NW-101"},
+          {"type": "rh", "val": 45.2, "unit": "%", "ts": "2026-04-18T10:30:00Z", "zone_id": "NW-101"}
+        ]
+      }
+    }
+  },
+
+  "pull_mode_case_c_building_wide": {
+    "_description": "Source response from a building-wide endpoint. All metrics, all zones.",
+    "endpoint_config": {
+      "endpointMode": "building_wide",
+      "locationMapping": {
+        "strategy": "field_match",
+        "source_field": "zone_code",
+        "match_target": "external_refs.bms_zone"
+      },
+      "sensorMapping": {
+        "source_field": "sensor_id",
+        "match_target": "source_identifier",
+        "auto_register": true
+      }
+    },
+    "source_response": {
+      "data": {
+        "all_readings": [
+          {"measurement_type": "AIR_TEMP", "measured_value": 22.1, "unit_of_measure": "degC", "capture_time": "2026-04-18T10:30:00Z", "location_code": "NW-101", "device_id": "DEMO-NW101-TEMP-A"},
+          {"measurement_type": "CARBON_DIOXIDE", "measured_value": 680, "unit_of_measure": "PPM", "capture_time": "2026-04-18T10:30:00Z", "location_code": "NW-101", "device_id": "DEMO-NW101-IAQ"},
+          {"measurement_type": "REL_HUMIDITY", "measured_value": 45.2, "unit_of_measure": "PCT", "capture_time": "2026-04-18T10:30:00Z", "location_code": "NW-101", "device_id": "DEMO-NW101-IAQ"},
+          {"measurement_type": "SOUND_PRESSURE", "measured_value": 42.7, "unit_of_measure": "dB(A)", "capture_time": "2026-04-18T10:30:00Z", "location_code": "NW-102", "device_id": "DEMO-NW102-MULTI"}
+        ]
+      }
+    }
+  },
+
+  "pull_mode_case_d_multi_endpoint": {
+    "_description": "Two endpoints for the same building, each serving different zones.",
+    "endpoints": [
+      {
+        "endpointId": "ep-north",
+        "endpointMode": "multi_zone",
+        "servedRoomIds": ["loc-rm101", "loc-rm102", "loc-rm201"],
+        "availableMetrics": ["temperature", "co2"]
+      },
+      {
+        "endpointId": "ep-south",
+        "endpointMode": "multi_zone",
+        "servedRoomIds": ["loc-rm-sw1"],
+        "availableMetrics": ["temperature", "relative_humidity"]
+      }
+    ]
+  },
+
+  "pull_mode_case_e_sensor_centric": {
+    "_description": "Source response from a sensor-centric endpoint. Each reading has a sensor ID.",
+    "endpoint_config": {
+      "endpointMode": "sensor_centric",
+      "sensorMapping": {
+        "source_field": "sensor_id",
+        "match_target": "source_identifier",
+        "auto_register": false
+      }
+    },
+    "source_response": {
+      "sensors": [
+        {"device_serial": "DEMO-NW201-NOISE", "db_level": 38.5, "last_reading_at": "2026-04-18T10:28:00Z"},
+        {"device_serial": "DEMO-NW101-TEMP-A", "db_level": 22.1, "last_reading_at": "2026-04-18T10:29:00Z"}
+      ]
+    }
+  },
+
+  "normalized_output_all_four_metrics": {
+    "_description": "What the internal telemetry_readings rows look like after normalization. All four metrics produce identical structure.",
+    "rows": [
+      {
+        "id": "tr-a1b2c3d4e5f6",
+        "buildingId": "bldg-demo",
+        "locationId": "loc-rm101",
+        "sensorId": "sens-t1-win",
+        "metricType": "temperature",
+        "value": 22.1,
+        "unit": "C",
+        "recordedAt": "2026-04-18T10:30:00+00:00",
+        "ingestedAt": "2026-04-18T10:30:04+00:00",
+        "sourceLevel": "sensor",
+        "aggregationMethod": "raw",
+        "qualityFlag": "good",
+        "connectorId": "ep-multi-nw"
+      },
+      {
+        "id": "tr-b2c3d4e5f6g7",
+        "buildingId": "bldg-demo",
+        "locationId": "loc-rm101",
+        "sensorId": "sens-co2-101",
+        "metricType": "co2",
+        "value": 680,
+        "unit": "ppm",
+        "recordedAt": "2026-04-18T10:30:00+00:00",
+        "ingestedAt": "2026-04-18T10:30:04+00:00",
+        "sourceLevel": "sensor",
+        "aggregationMethod": "raw",
+        "qualityFlag": "good",
+        "connectorId": "ep-multi-nw"
+      },
+      {
+        "id": "tr-c3d4e5f6g7h8",
+        "buildingId": "bldg-demo",
+        "locationId": "loc-rm101",
+        "sensorId": "sens-co2-101",
+        "metricType": "relative_humidity",
+        "value": 45.2,
+        "unit": "%",
+        "recordedAt": "2026-04-18T10:30:00+00:00",
+        "ingestedAt": "2026-04-18T10:30:04+00:00",
+        "sourceLevel": "sensor",
+        "aggregationMethod": "raw",
+        "qualityFlag": "good",
+        "connectorId": "ep-multi-nw"
+      },
+      {
+        "id": "tr-d4e5f6g7h8i9",
+        "buildingId": "bldg-demo",
+        "locationId": "loc-rm102",
+        "sensorId": "sens-multi-102",
+        "metricType": "noise",
+        "value": 42.7,
+        "unit": "dBA",
+        "recordedAt": "2026-04-18T10:30:00+00:00",
+        "ingestedAt": "2026-04-18T10:30:04+00:00",
+        "sourceLevel": "sensor",
+        "aggregationMethod": "raw",
+        "qualityFlag": "good",
+        "connectorId": null
+      }
+    ]
+  },
+
+  "room_summary_response": {
+    "_description": "What the /room-summary endpoint returns after aggregating multiple sensors.",
+    "example": [
+      {
+        "locationId": "loc-rm101",
+        "locationName": "Room 1.01",
+        "locationType": "room",
+        "metricType": "temperature",
+        "value": 22.3,
+        "unit": "C",
+        "recordedAt": "2026-04-18T10:30:00+00:00",
+        "aggregationMethod": "avg",
+        "sensorCount": 2,
+        "qualityFlag": "good",
+        "isStale": false
+      }
+    ]
+  },
+
+  "validation_rules": {
+    "ingestion_time": [
+      "Reject if metric_type missing",
+      "Reject if value missing or non-numeric",
+      "Reject if recorded_at missing or unparseable",
+      "Flag quality=out_of_range if value outside valid_range_min/max",
+      "Flag quality=suspect if recorded_at > now+5min (future)",
+      "Flag quality=suspect if recorded_at < now-30days (stale source)",
+      "Infer unit from metric_type if not provided",
+      "Apply calibration_offset if sensor has one",
+      "Skip duplicate (building_id, location_id, sensor_id, metric_type, recorded_at)",
+      "Max 1000 readings per batch"
+    ],
+    "query_time": [
+      "Exclude quality=out_of_range from aggregation by default",
+      "Apply room_aggregation_rule (avg/min/max/median/preferred_sensor)",
+      "Apply conflict_resolution when multiple endpoints overlap",
+      "Flag is_stale=true if no recent reading within stale_threshold_minutes",
+      "Only include is_active=true sensors in aggregation"
+    ]
+  }
+}

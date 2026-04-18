@@ -15,6 +15,13 @@ from .fm_request import FMRoleRequest, FMRequestStatus
 from .telemetry import TelemetryReading
 from .building_connector import BuildingConnector
 
+# Telemetry integration models
+from .location import Location
+from .zone import Zone, ZoneMember
+from .telemetry_endpoint import TelemetryEndpoint
+from .sensor import Sensor
+from .building_telemetry_config import BuildingTelemetryConfig
+
 __all__ = [
     "Tenant",
     "User",
@@ -34,4 +41,11 @@ __all__ = [
     "FMRequestStatus",
     "TelemetryReading",
     "BuildingConnector",
+    # Telemetry integration
+    "Location",
+    "Zone",
+    "ZoneMember",
+    "TelemetryEndpoint",
+    "Sensor",
+    "BuildingTelemetryConfig",
 ]

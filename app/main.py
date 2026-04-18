@@ -43,6 +43,13 @@ from .models import (  # noqa: F401
     FMRequestStatus,
     TelemetryReading,
     BuildingConnector,
+    # Telemetry integration
+    Location,
+    Zone,
+    ZoneMember,
+    TelemetryEndpoint,
+    Sensor,
+    BuildingTelemetryConfig,
 )
 
 # API routers
@@ -55,6 +62,11 @@ from .api.datasets import router as datasets_router
 from .api.fm_requests import router as fm_requests_router
 from .api.telemetry import router as telemetry_router
 from .api.connectors import router as connectors_router
+# Telemetry integration routers
+from .api.locations import router as locations_router
+from .api.sensors import router as sensors_router
+from .api.zones import router as zones_router
+from .api.telemetry_endpoints import router as telemetry_endpoints_router
 
 
 @asynccontextmanager
@@ -105,6 +117,11 @@ app.include_router(datasets_router)
 app.include_router(fm_requests_router)
 app.include_router(telemetry_router)
 app.include_router(connectors_router)
+# Telemetry integration
+app.include_router(locations_router)
+app.include_router(sensors_router)
+app.include_router(zones_router)
+app.include_router(telemetry_endpoints_router)
 
 
 @app.get("/health")
