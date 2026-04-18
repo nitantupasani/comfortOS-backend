@@ -56,6 +56,10 @@ ZONES = [
 def upgrade() -> None:
     conn = op.get_bind()
 
+    # Supabase imposes a per-statement timeout; disable it for this migration
+    # so the bulk telemetry_readings backfill can finish.
+    conn.execute(sa.text("SET statement_timeout = 0"))
+
     # Find which zones actually have telemetry data
     result = conn.execute(sa.text(
         "SELECT DISTINCT zone FROM telemetry_readings "

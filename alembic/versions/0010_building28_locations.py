@@ -39,6 +39,10 @@ def _parse_room(code: str):
 def upgrade() -> None:
     conn = op.get_bind()
 
+    # Supabase imposes a per-statement timeout; disable it for this migration
+    # so the bulk telemetry_readings backfill can finish.
+    conn.execute(sa.text("SET statement_timeout = 0"))
+
     # Collect unique floors
     floors = sorted(set(_parse_room(r)[0] for r in ROOMS))
 
