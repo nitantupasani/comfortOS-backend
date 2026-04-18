@@ -289,7 +289,8 @@ async def query_series(
             )
             result = await db.execute(stmt)
             rows = result.all()
-            return _build_series_response(building_id, metricType, granularity, rows, aggregated=True)
+            loc_names = await _location_name_map(db, rows)
+            return _build_series_response(building_id, metricType, granularity, rows, aggregated=True, location_names=loc_names)
 
     # Raw
     stmt = (
@@ -300,7 +301,8 @@ async def query_series(
     )
     result = await db.execute(stmt)
     readings = result.scalars().all()
-    return _build_raw_response(building_id, metricType, readings, groupBy=groupBy)
+    loc_names = await _location_name_map(db, readings)
+    return _build_raw_response(building_id, metricType, readings, groupBy=groupBy, location_names=loc_names)
 
 
 # -- Query: latest ---------------------------------------------------------
@@ -574,6 +576,18 @@ def _group_key_for(r, groupBy: str) -> str:
         return "Building"
 
 
+async def _location_name_map(db: AsyncSession, rows) -> dict[str, str]:
+    """Build {location_id: name} map for all location_ids found in rows."""
+    loc_ids = {getattr(r, "location_id", None) for r in rows}
+    loc_ids.discard(None)
+    if not loc_ids:
+        return {}
+    result = await db.execute(
+        select(Location.id, Location.name).where(Location.id.in_(loc_ids))
+    )
+    return {lid: lname for lid, lname in result.all()}
+
+
 def _build_grouped_series_response(
     building_id: str, metric_type: str, granularity: str, group_by: str, rows,
 ) -> TelemetryQueryResponse:
@@ -613,8 +627,10 @@ def _build_grouped_series_response(
 
 def _build_series_response(
     building_id: str, metric_type: str, granularity: str, rows, aggregated: bool,
+    location_names: dict[str, str] | None = None,
 ) -> TelemetryQueryResponse:
     unit = rows[0].unit if rows else ""
+    loc_names = location_names or {}
     groups: dict[str, list] = {}
     for r in rows:
         key = r.location_id or r.floor or r.zone or "Building"
@@ -632,9 +648,11 @@ def _build_series_response(
             )
             for r in grp
         ]
+        label = loc_names.get(key, key)
         series.append(TelemetrySeriesGroup(
-            label=key,
+            label=label,
             locationId=grp[0].location_id,
+            locationName=loc_names.get(grp[0].location_id),
             floor=grp[0].floor,
             zone=grp[0].zone,
             points=points,
@@ -652,8 +670,10 @@ def _build_series_response(
 def _build_raw_response(
     building_id: str, metric_type: str, readings: list[TelemetryReading],
     groupBy: str = "room",
+    location_names: dict[str, str] | None = None,
 ) -> TelemetryQueryResponse:
     unit = readings[0].unit if readings else ""
+    loc_names = location_names or {}
     groups: dict[str, list[TelemetryReading]] = {}
     for r in readings:
         key = _group_key_for(r, groupBy)
@@ -673,9 +693,12 @@ def _build_raw_response(
             )
             for r in grp
         ]
+        loc_id = grp[0].location_id
+        label = loc_names.get(loc_id, key) if loc_id else key
         series.append(TelemetrySeriesGroup(
-            label=key,
-            locationId=grp[0].location_id,
+            label=label,
+            locationId=loc_id,
+            locationName=loc_names.get(loc_id) if loc_id else None,
             floor=grp[0].floor,
             zone=grp[0].zone,
             points=points,
