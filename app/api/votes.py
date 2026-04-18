@@ -121,12 +121,19 @@ async def submit_vote(
     # Per-user daily vote rate limit
     await _check_daily_vote_limit(user.id, body.buildingId, db)
 
+    # Normalize payload: frontend submits the occupant's current room as
+    # `room`; analytics joins on `zone`. Mirror when the caller hasn't set
+    # one explicitly so every vote is location-resolvable downstream.
+    payload = dict(body.payload or {})
+    if "zone" not in payload and payload.get("room"):
+        payload["zone"] = payload["room"]
+
     # Create vote
     vote = VoteModel(
         vote_uuid=body.voteUuid,
         building_id=body.buildingId,
         user_id=user.id,
-        payload=body.payload,
+        payload=payload,
         schema_version=body.schemaVersion,
         status=VoteStatus.confirmed,
         created_at=datetime.fromisoformat(body.createdAt.replace("Z", "+00:00"))
