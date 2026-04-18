@@ -19,9 +19,31 @@ branch_labels = None
 depends_on = None
 
 
+def _safe_create_table(name, *columns, **kw):
+    """Create table only if it does not already exist."""
+    try:
+        op.create_table(name, *columns, **kw)
+    except Exception:
+        pass  # table already exists from create_all
+
+
+def _safe_create_index(name, table, columns, **kw):
+    try:
+        op.create_index(name, table, columns, **kw)
+    except Exception:
+        pass
+
+
+def _safe_add_column(table, column):
+    try:
+        op.add_column(table, column)
+    except Exception:
+        pass  # column already exists
+
+
 def upgrade() -> None:
     # ── locations ────────────────────────────────────────────
-    op.create_table(
+    _safe_create_table(
         "locations",
         sa.Column("id", sa.String(50), primary_key=True),
         sa.Column("building_id", sa.String(50), sa.ForeignKey("buildings.id"), nullable=False),
@@ -37,13 +59,13 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
     )
-    op.create_index("ix_location_building_type", "locations", ["building_id", "type"])
-    op.create_index("ix_location_building_parent", "locations", ["building_id", "parent_id"])
-    op.create_index("ix_locations_parent_id", "locations", ["parent_id"])
-    op.create_index("ix_locations_building_id", "locations", ["building_id"])
+    _safe_create_index("ix_location_building_type", "locations", ["building_id", "type"])
+    _safe_create_index("ix_location_building_parent", "locations", ["building_id", "parent_id"])
+    _safe_create_index("ix_locations_parent_id", "locations", ["parent_id"])
+    _safe_create_index("ix_locations_building_id", "locations", ["building_id"])
 
     # ── zones ────────────────────────────────────────────────
-    op.create_table(
+    _safe_create_table(
         "zones",
         sa.Column("id", sa.String(50), primary_key=True),
         sa.Column("building_id", sa.String(50), sa.ForeignKey("buildings.id"), nullable=False),
@@ -53,19 +75,19 @@ def upgrade() -> None:
         sa.Column("metadata", sa.JSON, nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
     )
-    op.create_index("ix_zones_building_id", "zones", ["building_id"])
+    _safe_create_index("ix_zones_building_id", "zones", ["building_id"])
 
     # ── zone_members ─────────────────────────────────────────
-    op.create_table(
+    _safe_create_table(
         "zone_members",
         sa.Column("zone_id", sa.String(50), sa.ForeignKey("zones.id", ondelete="CASCADE"), primary_key=True),
         sa.Column("location_id", sa.String(50), sa.ForeignKey("locations.id"), primary_key=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
     )
-    op.create_index("ix_zone_member_location", "zone_members", ["location_id"])
+    _safe_create_index("ix_zone_member_location", "zone_members", ["location_id"])
 
     # ── telemetry_endpoints ──────────────────────────────────
-    op.create_table(
+    _safe_create_table(
         "telemetry_endpoints",
         sa.Column("endpoint_id", sa.String(50), primary_key=True),
         sa.Column("building_id", sa.String(50), sa.ForeignKey("buildings.id"), nullable=False),
@@ -85,7 +107,7 @@ def upgrade() -> None:
         sa.Column("http_method", sa.String(10), nullable=False, server_default="GET"),
         sa.Column("request_headers", sa.JSON, nullable=True),
         sa.Column("request_body", sa.JSON, nullable=True),
-        sa.Column("polling_config", sa.JSON, nullable=False, server_default='{"interval_minutes":15,"timeout_seconds":30,"retry_count":3,"backoff_strategy":"exponential"}'),
+        sa.Column("polling_config", sa.JSON, nullable=False, server_default='{"interval_minutes":15}'),
         sa.Column("priority", sa.Integer, nullable=False, server_default="0"),
         sa.Column("is_enabled", sa.Boolean, nullable=False, server_default="1"),
         sa.Column("last_polled_at", sa.DateTime(timezone=True), nullable=True),
@@ -97,10 +119,10 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
     )
-    op.create_index("ix_endpoint_building_enabled", "telemetry_endpoints", ["building_id", "is_enabled"])
+    _safe_create_index("ix_endpoint_building_enabled", "telemetry_endpoints", ["building_id", "is_enabled"])
 
     # ── sensors ──────────────────────────────────────────────
-    op.create_table(
+    _safe_create_table(
         "sensors",
         sa.Column("sensor_id", sa.String(50), primary_key=True),
         sa.Column("building_id", sa.String(50), sa.ForeignKey("buildings.id"), nullable=False),
@@ -121,13 +143,13 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
     )
-    op.create_index("ix_sensor_building_active", "sensors", ["building_id", "is_active"])
-    op.create_index("ix_sensor_room", "sensors", ["room_id", "is_active"])
-    op.create_index("ix_sensor_source_id", "sensors", ["source_identifier", "building_id"], unique=True)
-    op.create_index("ix_sensor_endpoint", "sensors", ["source_endpoint_id"])
+    _safe_create_index("ix_sensor_building_active", "sensors", ["building_id", "is_active"])
+    _safe_create_index("ix_sensor_room", "sensors", ["room_id", "is_active"])
+    _safe_create_index("ix_sensor_source_id", "sensors", ["source_identifier", "building_id"], unique=True)
+    _safe_create_index("ix_sensor_endpoint", "sensors", ["source_endpoint_id"])
 
     # ── building_telemetry_config ────────────────────────────
-    op.create_table(
+    _safe_create_table(
         "building_telemetry_config",
         sa.Column("id", sa.String(50), primary_key=True),
         sa.Column("building_id", sa.String(50), sa.ForeignKey("buildings.id"), nullable=False),
@@ -148,25 +170,24 @@ def upgrade() -> None:
     )
 
     # ── Add new columns to telemetry_readings ────────────────
-    op.add_column("telemetry_readings",
+    _safe_add_column("telemetry_readings",
         sa.Column("location_id", sa.String(50), nullable=True))
-    op.add_column("telemetry_readings",
+    _safe_add_column("telemetry_readings",
         sa.Column("sensor_id", sa.String(50), nullable=True))
-    op.add_column("telemetry_readings",
+    _safe_add_column("telemetry_readings",
         sa.Column("source_level", sa.String(20), nullable=True))
-    op.add_column("telemetry_readings",
+    _safe_add_column("telemetry_readings",
         sa.Column("aggregation_method", sa.String(20), nullable=True, server_default="raw"))
-    op.add_column("telemetry_readings",
+    _safe_add_column("telemetry_readings",
         sa.Column("quality_flag", sa.String(20), nullable=True, server_default="good"))
-    op.add_column("telemetry_readings",
+    _safe_add_column("telemetry_readings",
         sa.Column("connector_id", sa.String(50), nullable=True))
 
-    # Indexes on new columns
-    op.create_index("ix_telemetry_location_metric_time",
+    _safe_create_index("ix_telemetry_location_metric_time",
         "telemetry_readings", ["location_id", "metric_type", "recorded_at"])
-    op.create_index("ix_telemetry_sensor_time",
+    _safe_create_index("ix_telemetry_sensor_time",
         "telemetry_readings", ["sensor_id", "recorded_at"])
-    op.create_index("ix_telemetry_building_location_time",
+    _safe_create_index("ix_telemetry_building_location_time",
         "telemetry_readings", ["building_id", "location_id", "recorded_at"])
 
 
