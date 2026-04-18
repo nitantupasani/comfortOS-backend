@@ -272,7 +272,27 @@ async def query_series(
             )
             result = await db.execute(stmt)
             rows = result.all()
-            return _build_grouped_series_response(building_id, metricType, granularity, groupBy, rows)
+
+            # Fetch zone→group mapping so the frontend can tie votes to groups
+            zone_map_stmt = (
+                select(
+                    distinct(TelemetryReading.zone),
+                    label_expr.label("group_key"),
+                )
+                .where(*conditions)
+                .where(TelemetryReading.zone.isnot(None))
+            )
+            zone_map_result = await db.execute(zone_map_stmt)
+            group_zones: dict[str, list[str]] = {}
+            for zone_val, grp_key in zone_map_result.all():
+                gk = grp_key or "Unknown"
+                if groupBy == "floor":
+                    gk = f"Floor {gk}" if gk not in ("0", "") else "Building"
+                elif groupBy == "wing":
+                    gk = f"Wing {gk}" if gk and gk != "" else "Unknown"
+                group_zones.setdefault(gk, []).append(zone_val)
+
+            return _build_grouped_series_response(building_id, metricType, granularity, groupBy, rows, group_zones)
         else:
             stmt = (
                 select(
@@ -590,9 +610,11 @@ async def _location_name_map(db: AsyncSession, rows) -> dict[str, str]:
 
 def _build_grouped_series_response(
     building_id: str, metric_type: str, granularity: str, group_by: str, rows,
+    group_zones: dict[str, list[str]] | None = None,
 ) -> TelemetryQueryResponse:
     """Build response for floor-level or wing-level grouping."""
     unit = rows[0].unit if rows else ""
+    gz = group_zones or {}
     groups: dict[str, list] = {}
     for r in rows:
         key = r.group_key or "Unknown"
@@ -613,6 +635,7 @@ def _build_grouped_series_response(
         ]
         series.append(TelemetrySeriesGroup(
             label=key,
+            zones=sorted(gz.get(key, [])),
             points=points,
         ))
 
@@ -649,12 +672,14 @@ def _build_series_response(
             for r in grp
         ]
         label = loc_names.get(key, key)
+        zone_val = grp[0].zone
         series.append(TelemetrySeriesGroup(
             label=label,
             locationId=grp[0].location_id,
             locationName=loc_names.get(grp[0].location_id),
+            zones=[zone_val] if zone_val else [],
             floor=grp[0].floor,
-            zone=grp[0].zone,
+            zone=zone_val,
             points=points,
         ))
 
@@ -694,13 +719,15 @@ def _build_raw_response(
             for r in grp
         ]
         loc_id = grp[0].location_id
+        zone_val = grp[0].zone
         label = loc_names.get(loc_id, key) if loc_id else key
         series.append(TelemetrySeriesGroup(
             label=label,
             locationId=loc_id,
             locationName=loc_names.get(loc_id) if loc_id else None,
+            zones=[zone_val] if zone_val else [],
             floor=grp[0].floor,
-            zone=grp[0].zone,
+            zone=zone_val,
             points=points,
         ))
 

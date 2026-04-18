@@ -72,6 +72,7 @@ class TelemetrySeriesGroup(BaseModel):
     locationId: str | None = None
     locationName: str | None = None
     locationType: str | None = None
+    zones: list[str] = []
     points: list[TelemetryPoint]
     # Legacy
     floor: str | None = None
