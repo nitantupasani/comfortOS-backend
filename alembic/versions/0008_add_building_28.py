@@ -19,11 +19,12 @@ API_KEY = "building28-telemetry-api-key-2026"
 
 
 def upgrade() -> None:
-    # Create building
+    # Create building (skip if already exists)
     op.execute(
         sa.text(
             "INSERT INTO buildings (id, name, address, city, requires_access_permission, created_at) "
-            "VALUES (:id, :name, :address, :city, :rap, NOW())"
+            "VALUES (:id, :name, :address, :city, :rap, NOW()) "
+            "ON CONFLICT (id) DO NOTHING"
         ).bindparams(
             id=BUILDING_ID,
             name="Building 28",
@@ -33,11 +34,12 @@ def upgrade() -> None:
         )
     )
 
-    # Create building config with telemetry API key
+    # Create building config with telemetry API key (skip if already exists)
     op.execute(
         sa.text(
             "INSERT INTO building_configs (id, building_id, schema_version, dashboard_layout, is_active, created_at, updated_at) "
-            "VALUES (:id, :building_id, :schema_version, CAST(:dashboard_layout AS jsonb), :is_active, NOW(), NOW())"
+            "VALUES (:id, :building_id, :schema_version, CAST(:dashboard_layout AS jsonb), :is_active, NOW(), NOW()) "
+            "ON CONFLICT (id) DO NOTHING"
         ).bindparams(
             sa.bindparam("dashboard_layout", type_=sa.Text),
             id=CONFIG_ID,
