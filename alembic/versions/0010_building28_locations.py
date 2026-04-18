@@ -54,12 +54,11 @@ def upgrade() -> None:
             name=f"Floor {floor}", code=f"F{floor}", sort=int(floor),
         ))
 
-    # Create room-level locations and backfill telemetry_readings
+    # Create room-level locations
     for room_code in ROOMS:
         floor, wing, room = _parse_room(room_code)
         floor_id = f"loc-b28-F{floor}"
         room_id = f"loc-b28-{room_code}"
-        wing_name = "West" if wing == "W" else "East"
         room_name = f"{floor}.{wing}.{room}"
 
         conn.execute(sa.text(
@@ -71,12 +70,16 @@ def upgrade() -> None:
             name=room_name, code=room_code, sort=int(room),
         ))
 
-        # Backfill: set location_id on telemetry_readings that match this zone
-        conn.execute(sa.text(
-            "UPDATE telemetry_readings "
-            "SET location_id = :loc_id "
-            "WHERE building_id = :bid AND zone = :zone AND location_id IS NULL"
-        ).bindparams(loc_id=room_id, bid=BUILDING_ID, zone=room_code))
+    # Single-pass backfill: join telemetry_readings to the freshly-inserted
+    # room locations. This scans telemetry_readings once instead of once per room.
+    conn.execute(sa.text(
+        "UPDATE telemetry_readings t "
+        "SET location_id = l.id "
+        "FROM locations l "
+        "WHERE l.building_id = :bid AND l.type = 'room' "
+        "  AND t.building_id = :bid AND t.zone = l.code "
+        "  AND t.location_id IS NULL"
+    ).bindparams(bid=BUILDING_ID))
 
 
 def downgrade() -> None:

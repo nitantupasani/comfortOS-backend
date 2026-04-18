@@ -80,12 +80,16 @@ def upgrade() -> None:
             refs=f'{{"bms_zone": "{zone_code}"}}',
         ))
 
-        # Backfill: set location_id on telemetry_readings that match this zone
-        conn.execute(sa.text(
-            "UPDATE telemetry_readings "
-            "SET location_id = :loc_id "
-            "WHERE building_id = :bid AND zone = :zone AND location_id IS NULL"
-        ).bindparams(loc_id=loc_id, bid=BUILDING_ID, zone=zone_code))
+    # Single-pass backfill: join telemetry_readings to the freshly-inserted
+    # room locations. One scan instead of one per zone.
+    conn.execute(sa.text(
+        "UPDATE telemetry_readings t "
+        "SET location_id = l.id "
+        "FROM locations l "
+        "WHERE l.building_id = :bid AND l.type = 'room' "
+        "  AND t.building_id = :bid AND t.zone = l.code "
+        "  AND t.location_id IS NULL"
+    ).bindparams(bid=BUILDING_ID))
 
 
 def downgrade() -> None:
