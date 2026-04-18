@@ -46,8 +46,8 @@ def upgrade() -> None:
     for floor in floors:
         floor_id = f"loc-b28-F{floor}"
         conn.execute(sa.text(
-            "INSERT INTO locations (id, building_id, parent_id, type, name, code, sort_order) "
-            "VALUES (:id, :bid, NULL, 'floor', :name, :code, :sort) "
+            "INSERT INTO locations (id, building_id, parent_id, type, name, code, sort_order, created_at, updated_at) "
+            "VALUES (:id, :bid, NULL, 'floor', :name, :code, :sort, NOW(), NOW()) "
             "ON CONFLICT (id) DO NOTHING"
         ).bindparams(
             id=floor_id, bid=BUILDING_ID,
@@ -63,8 +63,8 @@ def upgrade() -> None:
         room_name = f"{floor}.{wing}.{room}"
 
         conn.execute(sa.text(
-            "INSERT INTO locations (id, building_id, parent_id, type, name, code, sort_order) "
-            "VALUES (:id, :bid, :pid, 'room', :name, :code, :sort) "
+            "INSERT INTO locations (id, building_id, parent_id, type, name, code, sort_order, created_at, updated_at) "
+            "VALUES (:id, :bid, :pid, 'room', :name, :code, :sort, NOW(), NOW()) "
             "ON CONFLICT (id) DO NOTHING"
         ).bindparams(
             id=room_id, bid=BUILDING_ID, pid=floor_id,
