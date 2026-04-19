@@ -312,12 +312,12 @@ async def query_series(
             loc_names = await _location_name_map(db, rows)
             return _build_series_response(building_id, metricType, granularity, rows, aggregated=True, location_names=loc_names)
 
-    # Raw — but when grouping by floor/wing, apply 5-minute bucketed
+    # Raw — but when grouping by floor/wing, apply 15-minute bucketed
     # averaging to avoid zigzag artifacts from interleaved room readings.
     if groupBy in ("floor", "wing"):
-        # 5-minute bucket: floor epoch to nearest 300s, convert back
+        # 15-minute bucket: floor epoch to nearest 900s, convert back
         bucket_expr = func.to_timestamp(
-            func.floor(func.extract('epoch', TelemetryReading.recorded_at) / 300) * 300
+            func.floor(func.extract('epoch', TelemetryReading.recorded_at) / 900) * 900
         )
         if groupBy == "floor":
             label_expr = TelemetryReading.floor
