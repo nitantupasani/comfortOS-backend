@@ -312,7 +312,50 @@ async def query_series(
             loc_names = await _location_name_map(db, rows)
             return _build_series_response(building_id, metricType, granularity, rows, aggregated=True, location_names=loc_names)
 
-    # Raw
+    # Raw — but when grouping by floor/wing, apply 5-minute bucketed
+    # averaging to avoid zigzag artifacts from interleaved room readings.
+    if groupBy in ("floor", "wing"):
+        trunc = "5 minutes"
+        if groupBy == "floor":
+            label_expr = TelemetryReading.floor
+        else:
+            label_expr = func.split_part(TelemetryReading.zone, '-', 2)
+
+        stmt = (
+            select(
+                func.date_trunc(trunc, TelemetryReading.recorded_at).label("bucket"),
+                label_expr.label("group_key"),
+                func.round(func.avg(TelemetryReading.value).cast(sa.Numeric), 2).label("avg_val"),
+                func.min(TelemetryReading.unit).label("unit"),
+            )
+            .where(*conditions)
+            .group_by(text("1"), text("2"))
+            .order_by(text("1"))
+        )
+        result = await db.execute(stmt)
+        rows = result.all()
+
+        zone_map_stmt = (
+            select(
+                distinct(TelemetryReading.zone),
+                label_expr.label("group_key"),
+            )
+            .where(*conditions)
+            .where(TelemetryReading.zone.isnot(None))
+        )
+        zone_map_result = await db.execute(zone_map_stmt)
+        group_zones: dict[str, list[str]] = {}
+        for zone_val, grp_key in zone_map_result.all():
+            gk = grp_key or "Unknown"
+            if groupBy == "floor":
+                gk = f"Floor {gk}" if gk not in ("0", "") else "Building"
+            elif groupBy == "wing":
+                gk = f"Wing {gk}" if gk and gk != "" else "Unknown"
+            group_zones.setdefault(gk, []).append(zone_val)
+
+        return _build_grouped_series_response(building_id, metricType, "raw", groupBy, rows, group_zones)
+
+    # Raw room-level — no aggregation needed, each room is its own line
     stmt = (
         select(TelemetryReading)
         .where(*conditions)
