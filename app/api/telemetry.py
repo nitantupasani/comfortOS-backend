@@ -315,7 +315,10 @@ async def query_series(
     # Raw — but when grouping by floor/wing, apply 5-minute bucketed
     # averaging to avoid zigzag artifacts from interleaved room readings.
     if groupBy in ("floor", "wing"):
-        trunc = "5 minutes"
+        # 5-minute bucket: floor epoch to nearest 300s, convert back
+        bucket_expr = func.to_timestamp(
+            func.floor(func.extract('epoch', TelemetryReading.recorded_at) / 300) * 300
+        )
         if groupBy == "floor":
             label_expr = TelemetryReading.floor
         else:
@@ -323,7 +326,7 @@ async def query_series(
 
         stmt = (
             select(
-                func.date_trunc(trunc, TelemetryReading.recorded_at).label("bucket"),
+                bucket_expr.label("bucket"),
                 label_expr.label("group_key"),
                 func.round(func.avg(TelemetryReading.value).cast(sa.Numeric), 2).label("avg_val"),
                 func.min(TelemetryReading.unit).label("unit"),
