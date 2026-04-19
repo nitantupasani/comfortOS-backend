@@ -358,17 +358,28 @@ async def query_series(
 
         return _build_grouped_series_response(building_id, metricType, "raw", groupBy, rows, group_zones)
 
-    # Raw room-level — no aggregation needed, each room is its own line
+    # Raw room-level — apply 5-minute bucket averaging to handle rooms
+    # with multiple sensors that may report different values.
+    bucket_expr = func.to_timestamp(
+        func.floor(func.extract('epoch', TelemetryReading.recorded_at) / 300) * 300
+    )
     stmt = (
-        select(TelemetryReading)
+        select(
+            bucket_expr.label("bucket"),
+            TelemetryReading.location_id,
+            TelemetryReading.floor,
+            TelemetryReading.zone,
+            func.round(func.avg(TelemetryReading.value).cast(sa.Numeric), 2).label("avg_val"),
+            func.min(TelemetryReading.unit).label("unit"),
+        )
         .where(*conditions)
-        .order_by(TelemetryReading.recorded_at)
-        .limit(50_000)
+        .group_by(text("1"), TelemetryReading.location_id, TelemetryReading.floor, TelemetryReading.zone)
+        .order_by(text("1"))
     )
     result = await db.execute(stmt)
-    readings = result.scalars().all()
-    loc_names = await _location_name_map(db, readings)
-    return _build_raw_response(building_id, metricType, readings, groupBy=groupBy, location_names=loc_names)
+    rows = result.all()
+    loc_names = await _location_name_map(db, rows)
+    return _build_series_response(building_id, metricType, "raw", rows, aggregated=True, location_names=loc_names)
 
 
 # -- Query: latest ---------------------------------------------------------
