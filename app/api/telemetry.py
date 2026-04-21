@@ -312,17 +312,74 @@ async def query_series(
             loc_names = await _location_name_map(db, rows)
             return _build_series_response(building_id, metricType, granularity, rows, aggregated=True, location_names=loc_names)
 
-    # Raw
+    # Raw — but when grouping by floor/wing, apply 15-minute bucketed
+    # averaging to avoid zigzag artifacts from interleaved room readings.
+    if groupBy in ("floor", "wing"):
+        # 15-minute bucket: floor epoch to nearest 900s, convert back
+        bucket_expr = func.to_timestamp(
+            func.floor(func.extract('epoch', TelemetryReading.recorded_at) / 900) * 900
+        )
+        if groupBy == "floor":
+            label_expr = TelemetryReading.floor
+        else:
+            label_expr = func.split_part(TelemetryReading.zone, '-', 2)
+
+        stmt = (
+            select(
+                bucket_expr.label("bucket"),
+                label_expr.label("group_key"),
+                func.round(func.avg(TelemetryReading.value).cast(sa.Numeric), 2).label("avg_val"),
+                func.min(TelemetryReading.unit).label("unit"),
+            )
+            .where(*conditions)
+            .group_by(text("1"), text("2"))
+            .order_by(text("1"))
+        )
+        result = await db.execute(stmt)
+        rows = result.all()
+
+        zone_map_stmt = (
+            select(
+                distinct(TelemetryReading.zone),
+                label_expr.label("group_key"),
+            )
+            .where(*conditions)
+            .where(TelemetryReading.zone.isnot(None))
+        )
+        zone_map_result = await db.execute(zone_map_stmt)
+        group_zones: dict[str, list[str]] = {}
+        for zone_val, grp_key in zone_map_result.all():
+            gk = grp_key or "Unknown"
+            if groupBy == "floor":
+                gk = f"Floor {gk}" if gk not in ("0", "") else "Building"
+            elif groupBy == "wing":
+                gk = f"Wing {gk}" if gk and gk != "" else "Unknown"
+            group_zones.setdefault(gk, []).append(zone_val)
+
+        return _build_grouped_series_response(building_id, metricType, "raw", groupBy, rows, group_zones)
+
+    # Raw room-level — apply 5-minute bucket averaging to handle rooms
+    # with multiple sensors that may report different values.
+    bucket_expr = func.to_timestamp(
+        func.floor(func.extract('epoch', TelemetryReading.recorded_at) / 300) * 300
+    )
     stmt = (
-        select(TelemetryReading)
+        select(
+            bucket_expr.label("bucket"),
+            TelemetryReading.location_id,
+            TelemetryReading.floor,
+            TelemetryReading.zone,
+            func.round(func.avg(TelemetryReading.value).cast(sa.Numeric), 2).label("avg_val"),
+            func.min(TelemetryReading.unit).label("unit"),
+        )
         .where(*conditions)
-        .order_by(TelemetryReading.recorded_at)
-        .limit(50_000)
+        .group_by(text("1"), TelemetryReading.location_id, TelemetryReading.floor, TelemetryReading.zone)
+        .order_by(text("1"))
     )
     result = await db.execute(stmt)
-    readings = result.scalars().all()
-    loc_names = await _location_name_map(db, readings)
-    return _build_raw_response(building_id, metricType, readings, groupBy=groupBy, location_names=loc_names)
+    rows = result.all()
+    loc_names = await _location_name_map(db, rows)
+    return _build_series_response(building_id, metricType, "raw", rows, aggregated=True, location_names=loc_names)
 
 
 # -- Query: latest ---------------------------------------------------------
