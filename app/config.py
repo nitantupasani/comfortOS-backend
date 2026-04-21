@@ -28,7 +28,9 @@ class Settings(BaseSettings):
         "http://localhost:8000,"
         "http://127.0.0.1:8000,"
         "https://comfortos.netlify.app,"
-        "https://api.scientify.in"
+        "https://api.scientify.in,"
+        "https://comfortos.nl,"
+        "https://www.comfortos.nl"
     )
 
     # ── Database Pool (small VM — keep connections minimal) ──────────────
