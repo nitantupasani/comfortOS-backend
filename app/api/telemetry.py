@@ -309,6 +309,8 @@ async def query_series(
             )
             result = await db.execute(stmt)
             rows = result.all()
+            # Collapse per-placement rows into one averaged series per room.
+            rows = await _collapse_rows_to_rooms(db, rows)
             loc_names = await _location_name_map(db, rows)
             return _build_series_response(building_id, metricType, granularity, rows, aggregated=True, location_names=loc_names)
 
@@ -378,6 +380,8 @@ async def query_series(
     )
     result = await db.execute(stmt)
     rows = result.all()
+    # Collapse per-placement rows into one averaged series per room.
+    rows = await _collapse_rows_to_rooms(db, rows)
     loc_names = await _location_name_map(db, rows)
     return _build_series_response(building_id, metricType, "raw", rows, aggregated=True, location_names=loc_names)
 
@@ -663,6 +667,94 @@ async def _location_name_map(db: AsyncSession, rows) -> dict[str, str]:
         select(Location.id, Location.name).where(Location.id.in_(loc_ids))
     )
     return {lid: lname for lid, lname in result.all()}
+
+
+async def _resolve_placements_to_rooms(
+    db: AsyncSession, location_ids: set[str]
+) -> dict[str, str]:
+    """For every location_id, return the id to group by at room level.
+
+    A placement's direct parent is, by the canonical hierarchy, the room —
+    so readings captured against a placement (one sensor) are rolled up to
+    their containing room. Non-placement locations (room, floor, wing) and
+    placements whose parent is not a room are returned unchanged.
+    """
+    location_ids = {lid for lid in location_ids if lid}
+    if not location_ids:
+        return {}
+    rows = (
+        await db.execute(
+            select(Location.id, Location.type, Location.parent_id)
+            .where(Location.id.in_(location_ids))
+        )
+    ).all()
+    direct = {r.id: (r.type, r.parent_id) for r in rows}
+
+    parent_ids = {
+        parent_id
+        for (t, parent_id) in direct.values()
+        if t == "placement" and parent_id
+    }
+    parent_types: dict[str, str] = {}
+    if parent_ids:
+        parent_rows = (
+            await db.execute(
+                select(Location.id, Location.type)
+                .where(Location.id.in_(parent_ids))
+            )
+        ).all()
+        parent_types = {r.id: r.type for r in parent_rows}
+
+    mapping: dict[str, str] = {}
+    for loc_id in location_ids:
+        info = direct.get(loc_id)
+        if info is None:
+            mapping[loc_id] = loc_id
+            continue
+        t, parent_id = info
+        if t == "placement" and parent_id and parent_types.get(parent_id) == "room":
+            mapping[loc_id] = parent_id
+        else:
+            mapping[loc_id] = loc_id
+    return mapping
+
+
+async def _collapse_rows_to_rooms(db: AsyncSession, rows):
+    """Rewrite per-placement rows so readings from sensors in the same room
+    collapse into a single averaged series per room.
+
+    Expects rows with attributes: bucket, location_id, floor, zone, avg_val,
+    unit. Returns a list of SimpleNamespace objects with the same shape,
+    sorted by bucket.
+    """
+    from statistics import fmean
+    from types import SimpleNamespace
+    from collections import defaultdict
+
+    raw_ids = {getattr(r, "location_id", None) for r in rows if getattr(r, "location_id", None)}
+    room_map = await _resolve_placements_to_rooms(db, raw_ids)
+
+    regrouped: dict[tuple, list[float]] = defaultdict(list)
+    units: dict[tuple, str] = {}
+    for r in rows:
+        effective = room_map.get(r.location_id, r.location_id) if r.location_id else r.location_id
+        key = (r.bucket, effective, r.floor, r.zone)
+        regrouped[key].append(float(r.avg_val))
+        units[key] = r.unit
+
+    merged = [
+        SimpleNamespace(
+            bucket=bucket,
+            location_id=loc_id,
+            floor=floor,
+            zone=zone,
+            avg_val=round(fmean(values), 2),
+            unit=units[(bucket, loc_id, floor, zone)],
+        )
+        for (bucket, loc_id, floor, zone), values in regrouped.items()
+    ]
+    merged.sort(key=lambda r: r.bucket)
+    return merged
 
 
 def _build_grouped_series_response(
