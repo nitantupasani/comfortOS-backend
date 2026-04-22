@@ -12,6 +12,7 @@ class AiChatMessage(BaseModel):
 
 class AiChatRequest(BaseModel):
     messages: list[AiChatMessage] = Field(min_length=1, max_length=40)
+    buildingId: str | None = Field(default=None, max_length=50)
 
 
 class AiChatResponse(BaseModel):

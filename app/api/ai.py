@@ -4,8 +4,10 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from google.genai import errors as genai_errors
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..api.deps import get_current_user
+from ..database import get_db
 from ..models.user import User
 from ..schemas.ai import AiChatRequest, AiChatResponse
 from ..services.ai_chat import generate_reply
@@ -18,10 +20,16 @@ router = APIRouter(prefix="/ai", tags=["ai"])
 @router.post("/chat", response_model=AiChatResponse)
 async def chat(
     body: AiChatRequest,
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> AiChatResponse:
     try:
-        reply = await generate_reply(body.messages)
+        reply = await generate_reply(
+            body.messages,
+            user=user,
+            db=db,
+            building_id=body.buildingId,
+        )
     except genai_errors.APIError as e:
         code = getattr(e, "code", None) or 502
         if code == 401 or code == 403:
