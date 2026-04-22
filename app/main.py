@@ -47,6 +47,9 @@ from .models import (  # noqa: F401
     ComplaintCosign,
     ComplaintComment,
     ComplaintType,
+    ChatSession,
+    ChatMessage,
+    ChatMessageRole,
     # Telemetry integration
     Location,
     Zone,
