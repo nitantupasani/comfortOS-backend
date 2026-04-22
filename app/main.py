@@ -67,6 +67,7 @@ from .api.fm_requests import router as fm_requests_router
 from .api.complaints import router as complaints_router
 from .api.telemetry import router as telemetry_router
 from .api.connectors import router as connectors_router
+from .api.ai import router as ai_router
 # Telemetry integration routers
 from .api.locations import router as locations_router
 from .api.sensors import router as sensors_router
@@ -123,6 +124,7 @@ app.include_router(fm_requests_router)
 app.include_router(complaints_router)
 app.include_router(telemetry_router)
 app.include_router(connectors_router)
+app.include_router(ai_router)
 # Telemetry integration
 app.include_router(locations_router)
 app.include_router(sensors_router)
