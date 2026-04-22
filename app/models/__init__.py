@@ -14,6 +14,7 @@ from .connector_registry import ConnectorDefinition, DatasetDefinition
 from .fm_request import FMRoleRequest, FMRequestStatus
 from .telemetry import TelemetryReading
 from .building_connector import BuildingConnector
+from .complaint import Complaint, ComplaintCosign, ComplaintComment, ComplaintType
 
 # Telemetry integration models
 from .location import Location
@@ -41,6 +42,10 @@ __all__ = [
     "FMRequestStatus",
     "TelemetryReading",
     "BuildingConnector",
+    "Complaint",
+    "ComplaintCosign",
+    "ComplaintComment",
+    "ComplaintType",
     # Telemetry integration
     "Location",
     "Zone",

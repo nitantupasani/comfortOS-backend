@@ -43,6 +43,10 @@ from .models import (  # noqa: F401
     FMRequestStatus,
     TelemetryReading,
     BuildingConnector,
+    Complaint,
+    ComplaintCosign,
+    ComplaintComment,
+    ComplaintType,
     # Telemetry integration
     Location,
     Zone,
@@ -60,6 +64,7 @@ from .api.votes import router as votes_router
 from .api.presence import router as presence_router
 from .api.datasets import router as datasets_router
 from .api.fm_requests import router as fm_requests_router
+from .api.complaints import router as complaints_router
 from .api.telemetry import router as telemetry_router
 from .api.connectors import router as connectors_router
 # Telemetry integration routers
@@ -115,6 +120,7 @@ app.include_router(votes_router)
 app.include_router(presence_router)
 app.include_router(datasets_router)
 app.include_router(fm_requests_router)
+app.include_router(complaints_router)
 app.include_router(telemetry_router)
 app.include_router(connectors_router)
 # Telemetry integration
