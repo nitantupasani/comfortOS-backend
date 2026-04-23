@@ -83,19 +83,67 @@ _PUBLIC_PROMPT = (
 
 
 async def generate_public_reply(messages: list[AiChatMessage]) -> str:
-    """Landing-page chat: no auth, no tools, marketing-only persona."""
+    """Landing-page chat: no auth, no tools, marketing-only persona.
+
+    Retries once if the model truncates mid-answer (finish_reason other
+    than STOP), to avoid the 'it just stops' UX hit.
+    """
     client = _get_client()
     contents = _messages_to_contents(messages)
+
+    config = types.GenerateContentConfig(
+        system_instruction=_PUBLIC_PROMPT,
+        max_output_tokens=1024,
+    )
 
     response = await client.aio.models.generate_content(
         model=settings.gemini_model,
         contents=contents,
+        config=config,
+    )
+    text = _extract_text(response)
+    reason = _finish_reason(response)
+    if text and reason == "STOP":
+        return text
+
+    # Mid-sentence cut-off or soft error: retry once with a slightly higher
+    # ceiling and a 'continue where you left off' nudge. Cheaper than asking
+    # the user to re-prompt manually.
+    logger.warning(
+        "public chat incomplete: finish_reason=%s chars=%d. Retrying once.",
+        reason,
+        len(text),
+    )
+    retry_contents = list(contents)
+    if text:
+        retry_contents.append(
+            types.Content(
+                role="model",
+                parts=[types.Part.from_text(text=text)],
+            )
+        )
+        retry_contents.append(
+            types.Content(
+                role="user",
+                parts=[
+                    types.Part.from_text(
+                        text="Please continue and finish your previous reply.",
+                    )
+                ],
+            )
+        )
+    retry_response = await client.aio.models.generate_content(
+        model=settings.gemini_model,
+        contents=retry_contents,
         config=types.GenerateContentConfig(
             system_instruction=_PUBLIC_PROMPT,
-            max_output_tokens=512,
+            max_output_tokens=1024,
         ),
     )
-    return _extract_text(response) or "(no response)"
+    retry_text = _extract_text(retry_response)
+    if text and retry_text and retry_text != text:
+        return (text.rstrip() + " " + retry_text.lstrip()).strip()
+    return retry_text or text or "(no response)"
 
 
 def _persona_prompt(building_name: str, user_name: str, user_role: str) -> str:
@@ -197,6 +245,21 @@ def _extract_text(response: Any) -> str:
     if text_chunks:
         return "".join(text_chunks).strip()
     return (getattr(response, "text", "") or "").strip()
+
+
+def _finish_reason(response: Any) -> str:
+    """Return the first candidate's finish_reason as a string, or UNKNOWN."""
+    try:
+        cand = (response.candidates or [None])[0]
+    except AttributeError:
+        return "UNKNOWN"
+    if cand is None:
+        return "UNKNOWN"
+    fr = getattr(cand, "finish_reason", None)
+    if fr is None:
+        return "UNKNOWN"
+    # Enum has .name in google-genai; plain strings also supported.
+    return getattr(fr, "name", None) or str(fr)
 
 
 def _extract_function_calls(response: Any) -> list[tuple[str, dict]]:
