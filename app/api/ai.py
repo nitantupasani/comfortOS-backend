@@ -2,7 +2,7 @@
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from google.genai import errors as genai_errors
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,6 +23,7 @@ from ..schemas.ai import (
     ChatSessionUpdate,
 )
 from ..services.ai_chat import generate_public_reply, generate_reply
+from ..services.ai_rate_limiter import ai_rate_limiter
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +83,14 @@ def _derive_title(messages: list[AiChatMessage]) -> str:
             cleaned = m.content.strip().replace("\n", " ")
             return (cleaned[:57] + "…") if len(cleaned) > 60 else (cleaned or "New chat")
     return "New chat"
+
+
+def _client_ip(request: Request) -> str:
+    """Resolve the caller IP, honouring X-Forwarded-For from Caddy / ngrok."""
+    xff = request.headers.get("x-forwarded-for", "")
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
 
 
 # ── Session CRUD ─────────────────────────────────────────────────────────
@@ -202,6 +211,18 @@ async def chat(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> AiChatResponse:
+    # Per-user rate limit (sized for the Gemini daily budget).
+    allowed, retry_after = ai_rate_limiter.check_user(user.id)
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=(
+                "You have hit today's Vos chat limit. "
+                f"Try again in about {retry_after // 60 + 1} minutes."
+            ),
+            headers={"Retry-After": str(retry_after)},
+        )
+
     # If the client attached a sessionId, resolve + scope it to this user.
     session: ChatSession | None = None
     if body.sessionId:
@@ -257,8 +278,22 @@ async def chat(
 
 
 @router.post("/chat/public", response_model=AiChatResponse)
-async def public_chat(body: AiChatRequest) -> AiChatResponse:
+async def public_chat(body: AiChatRequest, request: Request) -> AiChatResponse:
     """Unauthenticated landing-page chat: marketing persona, no tools, no data access."""
+    # Per-IP rate limit so a single visitor cannot drain the shared daily
+    # Gemini budget.
+    ip = _client_ip(request)
+    allowed, retry_after = ai_rate_limiter.check_public_ip(ip)
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=(
+                "You've hit the public demo limit for now. "
+                f"Try again in about {retry_after // 60 + 1} minutes."
+            ),
+            headers={"Retry-After": str(retry_after)},
+        )
+
     try:
         reply = await generate_public_reply(body.messages)
     except genai_errors.APIError as e:

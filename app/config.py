@@ -48,6 +48,16 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.0-flash"
 
+    # ── AI rate limits ───────────────────────────────────────────────────
+    # Sized so 10 authenticated users + 25 landing-page IPs stay well
+    # under the Gemini 2.0 Flash free tier (1500 req/day), accounting for
+    # the tool-call amplification on the authenticated path.
+    # Hourly limits cap burst usage within the daily budget.
+    ai_rate_limit_user_daily: int = 30
+    ai_rate_limit_user_hourly: int = 10
+    ai_rate_limit_public_daily: int = 20
+    ai_rate_limit_public_hourly: int = 10
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",
