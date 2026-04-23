@@ -16,6 +16,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.complaint import Complaint, ComplaintCosign, ComplaintType
+from ..models.location import Location
 from ..models.telemetry import TelemetryReading
 from ..models.user import User
 from ..models.vote import Vote
@@ -29,53 +30,69 @@ from ..models.vote import Vote
 async def tool_get_current_temperature(
     db: AsyncSession, building_id: str, **_: Any,
 ) -> dict:
-    """Latest temperature readings for the building, plus a building-wide average."""
+    """Latest temperature readings for the building, plus a building-wide average.
+
+    Matches the dashboard /room-summary endpoint: filters out bad-quality and
+    null-location rows, averages sensors within each room, and collapses
+    placement-level rows into their parent room.
+    """
+    from collections import defaultdict
+    from ..api.telemetry import _resolve_placements_to_rooms
+
     now = datetime.now(timezone.utc)
-    # Latest reading per location for temperature in the last 24h.
     cutoff = now - timedelta(hours=24)
-    subq = (
+
+    stmt = (
         select(
             TelemetryReading.location_id,
-            func.max(TelemetryReading.recorded_at).label("max_ts"),
+            func.avg(TelemetryReading.value).label("avg_val"),
+            func.max(TelemetryReading.recorded_at).label("latest_ts"),
+            func.min(TelemetryReading.unit).label("unit"),
         )
         .where(
             TelemetryReading.building_id == building_id,
             TelemetryReading.metric_type == "temperature",
             TelemetryReading.recorded_at >= cutoff,
+            TelemetryReading.location_id.isnot(None),
+            TelemetryReading.quality_flag.in_(["good", "suspect"]),
         )
         .group_by(TelemetryReading.location_id)
-        .subquery()
     )
-    stmt = (
-        select(TelemetryReading)
-        .join(
-            subq,
-            (
-                (TelemetryReading.location_id == subq.c.location_id)
-                | (TelemetryReading.location_id.is_(None) & subq.c.location_id.is_(None))
-            )
-            & (TelemetryReading.recorded_at == subq.c.max_ts),
-        )
-        .where(
-            TelemetryReading.building_id == building_id,
-            TelemetryReading.metric_type == "temperature",
-        )
-    )
-    rows = (await db.execute(stmt)).scalars().all()
+    rows = (await db.execute(stmt)).all()
     if not rows:
         return {"ok": False, "reason": "No temperature readings in the last 24 hours."}
 
+    loc_ids = {r.location_id for r in rows}
+    room_map = await _resolve_placements_to_rooms(db, loc_ids)
+
+    per_room_vals: dict[str, list[float]] = defaultdict(list)
+    per_room_latest: dict[str, datetime] = {}
+    per_room_unit: dict[str, str] = {}
+    for r in rows:
+        rid = room_map.get(r.location_id, r.location_id)
+        per_room_vals[rid].append(float(r.avg_val))
+        if rid not in per_room_latest or r.latest_ts > per_room_latest[rid]:
+            per_room_latest[rid] = r.latest_ts
+        per_room_unit[rid] = r.unit or "C"
+
+    name_rows = (
+        await db.execute(
+            select(Location.id, Location.name).where(Location.id.in_(per_room_vals.keys()))
+        )
+    ).all()
+    names = {lid: ln for lid, ln in name_rows}
+
     readings = [
         {
-            "locationId": r.location_id,
-            "floor": r.floor,
-            "zone": r.zone,
-            "value": round(r.value, 2),
-            "unit": r.unit or "C",
-            "recordedAt": r.recorded_at.isoformat(),
+            "locationId": rid,
+            "name": names.get(rid, rid),
+            "value": round(sum(vals) / len(vals), 2),
+            "unit": per_room_unit[rid],
+            "recordedAt": per_room_latest[rid].isoformat(),
         }
-        for r in rows
+        for rid, vals in per_room_vals.items()
     ]
+    readings.sort(key=lambda x: x["value"], reverse=True)
     avg = round(sum(r["value"] for r in readings) / len(readings), 2)
     unit = readings[0]["unit"]
     return {
@@ -83,6 +100,8 @@ async def tool_get_current_temperature(
         "averageValue": avg,
         "unit": unit,
         "locationCount": len(readings),
+        "warmest": readings[0],
+        "coolest": readings[-1],
         "readings": readings[:20],
     }
 
@@ -272,10 +291,12 @@ def build_tool_declarations() -> types.Tool:
             types.FunctionDeclaration(
                 name="get_current_temperature",
                 description=(
-                    "Get the building's current temperature: average across all "
-                    "locations plus the latest per-location readings. Call this "
-                    "when the user asks how the building is feeling, asks about "
-                    "temperature, or says 'how are you'."
+                    "Get the building's current temperature: building-wide "
+                    "average, explicit warmest and coolest rooms, plus per-room "
+                    "readings sorted hottest→coolest. Use the 'warmest' and "
+                    "'coolest' fields directly — do not infer them from the list. "
+                    "Call this when the user asks how the building is feeling, "
+                    "asks about temperature, or says 'how are you'."
                 ),
                 parameters=types.Schema(
                     type=types.Type.OBJECT,
