@@ -65,8 +65,10 @@ class PersonalBuildingCreate(BaseModel):
 
 PERSONAL_BUILDING_LIMIT = 3
 
-# Mirrors ComfortOS/lib/ui/sdui/default_vote_form.dart so personal
-# buildings get a working vote form out of the box.
+# Default vote form seeded for personal buildings. Uses the canonical
+# -3..+3 thermal scale so the web VoteFormRenderer (clamped to ±3)
+# shows all 7 options; Flutter renders any min..max range, so it works
+# there too.
 _DEFAULT_PERSONAL_VOTE_FORM: dict = {
     "schemaVersion": 2,
     "formTitle": "Comfort Vote",
@@ -79,17 +81,17 @@ _DEFAULT_PERSONAL_VOTE_FORM: dict = {
             "key": "thermal_comfort",
             "type": "thermal_scale",
             "question": "How hot or cold do you feel?",
-            "min": 1,
-            "max": 7,
-            "defaultValue": 4,
+            "min": -3,
+            "max": 3,
+            "defaultValue": 0,
             "labels": {
-                "1": "Cold",
-                "2": "Cool",
-                "3": "Slightly Cool",
-                "4": "Neutral",
-                "5": "Slightly Warm",
-                "6": "Warm",
-                "7": "Hot",
+                "-3": "Cold",
+                "-2": "Cool",
+                "-1": "Slightly Cool",
+                "0": "Neutral",
+                "1": "Slightly Warm",
+                "2": "Warm",
+                "3": "Hot",
             },
         },
         {
