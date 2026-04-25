@@ -317,15 +317,22 @@ async def list_buildings(
     return buildings
 
 
+_FM_OR_ADMIN_ROLES = (
+    UserRole.admin,
+    UserRole.building_facility_manager,
+    UserRole.tenant_facility_manager,
+)
+
+
 @router.post("", status_code=201)
 async def create_building(
     body: BuildingCreate,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a new building. Admin only."""
-    if user.role != UserRole.admin:
-        raise HTTPException(status_code=403, detail="Admin only")
+    """Create a new building. Admin or facility manager."""
+    if user.role not in _FM_OR_ADMIN_ROLES:
+        raise HTTPException(status_code=403, detail="Facility manager or admin only")
 
     building = Building(
         name=body.name,
@@ -665,9 +672,9 @@ async def update_building(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update building fields. Admin only."""
-    if user.role != UserRole.admin:
-        raise HTTPException(status_code=403, detail="Admin only")
+    """Update building fields. Admin or facility manager."""
+    if user.role not in _FM_OR_ADMIN_ROLES:
+        raise HTTPException(status_code=403, detail="Facility manager or admin only")
 
     result = await db.execute(select(Building).where(Building.id == building_id))
     building = result.scalar_one_or_none()
