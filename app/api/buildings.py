@@ -55,6 +55,75 @@ class BuildingConfigUpdate(BaseModel):
     voteFormSchema: Any | None = None
     locationFormConfig: Any | None = None
 
+
+class PersonalBuildingCreate(BaseModel):
+    name: str
+    city: str | None = None
+    floor: str | None = None
+    zone: str | None = None
+
+
+PERSONAL_BUILDING_LIMIT = 3
+
+# Mirrors ComfortOS/lib/ui/sdui/default_vote_form.dart so personal
+# buildings get a working vote form out of the box.
+_DEFAULT_PERSONAL_VOTE_FORM: dict = {
+    "schemaVersion": 2,
+    "formTitle": "Comfort Vote",
+    "formDescription": "Quick survey about your environment – takes under a minute.",
+    "thanksMessage": "Thanks for your feedback!",
+    "allowAnonymous": False,
+    "cooldownMinutes": 30,
+    "fields": [
+        {
+            "key": "thermal_comfort",
+            "type": "thermal_scale",
+            "question": "How hot or cold do you feel?",
+            "min": 1,
+            "max": 7,
+            "defaultValue": 4,
+            "labels": {
+                "1": "Cold",
+                "2": "Cool",
+                "3": "Slightly Cool",
+                "4": "Neutral",
+                "5": "Slightly Warm",
+                "6": "Warm",
+                "7": "Hot",
+            },
+        },
+        {
+            "key": "thermal_preference",
+            "type": "single_select",
+            "question": "Do you want to be warmer or cooler?",
+            "options": [
+                {"label": "Warmer", "value": 1, "color": "orange", "emoji": "🔥"},
+                {"label": "I am good", "value": 2, "color": "green", "emoji": "👍"},
+                {"label": "Cooler", "value": 3, "color": "blue", "emoji": "❄️"},
+            ],
+        },
+        {
+            "key": "air_quality",
+            "type": "multi_select",
+            "question": "What do you think about the air quality?",
+            "options": [
+                {"label": "Suffocating", "value": "suffocating", "emoji": "😤"},
+                {"label": "Humid", "value": "humid", "emoji": "💧"},
+                {"label": "Dry", "value": "dry", "emoji": "🏜️"},
+                {"label": "Smelly", "value": "smelly", "emoji": "🤢"},
+                {
+                    "label": "All good!",
+                    "value": "all_good",
+                    "exclusive": True,
+                    "color": "green",
+                    "emoji": "✅",
+                },
+            ],
+        },
+    ],
+}
+
+
 router = APIRouter(prefix="/buildings", tags=["buildings"])
 
 
@@ -228,6 +297,132 @@ async def create_building(
     await db.commit()
     await db.refresh(building)
     return building.to_api_dict()
+
+
+async def _list_personal_buildings_for_user(
+    user_id: str, db: AsyncSession
+) -> list[Building]:
+    """Return Buildings the user self-registered (isPersonal flag in metadata)."""
+    result = await db.execute(
+        select(Building)
+        .join(UserBuildingAccess, UserBuildingAccess.building_id == Building.id)
+        .where(
+            UserBuildingAccess.user_id == user_id,
+            UserBuildingAccess.is_active == True,  # noqa: E712
+        )
+    )
+    buildings = result.scalars().all()
+    return [
+        b for b in buildings
+        if isinstance(b.metadata_, dict)
+        and b.metadata_.get("isPersonal") is True
+        and b.metadata_.get("createdByUserId") == user_id
+    ]
+
+
+@router.get("/personal")
+async def list_personal_buildings(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List the buildings this occupant self-registered."""
+    buildings = await _list_personal_buildings_for_user(user.id, db)
+    return [b.to_api_dict() for b in buildings]
+
+
+@router.post("/personal", status_code=201)
+async def create_personal_building(
+    body: PersonalBuildingCreate,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Occupant self-registers a building (max 3 per user).
+
+    Stores `{isPersonal, createdByUserId, floor, zone}` in `metadata_`,
+    grants the user access via `UserBuildingAccess`, and seeds a
+    `BuildingConfig` with the default comfort vote form.
+    """
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name is required")
+
+    existing = await _list_personal_buildings_for_user(user.id, db)
+    if len(existing) >= PERSONAL_BUILDING_LIMIT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"You can add up to {PERSONAL_BUILDING_LIMIT} personal buildings",
+        )
+
+    floor = (body.floor or "").strip() or None
+    zone = (body.zone or "").strip() or None
+    city = (body.city or "").strip() or None
+
+    metadata = {
+        "isPersonal": True,
+        "createdByUserId": user.id,
+    }
+    if floor:
+        metadata["floor"] = floor
+    if zone:
+        metadata["zone"] = zone
+
+    building = Building(
+        name=name,
+        address=name,
+        city=city,
+        requires_access_permission=True,
+        metadata_=metadata,
+    )
+    db.add(building)
+    await db.flush()
+
+    db.add(UserBuildingAccess(
+        user_id=user.id,
+        building_id=building.id,
+        granted_by=user.id,
+        is_active=True,
+    ))
+
+    db.add(BuildingConfig(
+        building_id=building.id,
+        vote_form_schema=_DEFAULT_PERSONAL_VOTE_FORM,
+        is_active=True,
+    ))
+
+    await db.commit()
+    await db.refresh(building)
+    return building.to_api_dict()
+
+
+@router.delete("/personal/{building_id}", status_code=204)
+async def delete_personal_building(
+    building_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove a personal building the caller created."""
+    result = await db.execute(select(Building).where(Building.id == building_id))
+    building = result.scalar_one_or_none()
+    if building is None:
+        raise HTTPException(status_code=404, detail="Building not found")
+
+    meta = building.metadata_ if isinstance(building.metadata_, dict) else {}
+    if not (meta.get("isPersonal") and meta.get("createdByUserId") == user.id):
+        raise HTTPException(status_code=403, detail="Not your personal building")
+
+    await db.execute(
+        UserBuildingAccess.__table__.delete().where(
+            UserBuildingAccess.building_id == building_id
+        )
+    )
+    await db.execute(
+        BuildingConfig.__table__.delete().where(
+            BuildingConfig.building_id == building_id
+        )
+    )
+    await db.delete(building)
+    await db.commit()
+    return Response(status_code=204)
 
 
 @router.put("/{building_id}")
