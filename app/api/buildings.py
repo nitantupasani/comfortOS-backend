@@ -56,23 +56,51 @@ class BuildingConfigUpdate(BaseModel):
     locationFormConfig: Any | None = None
 
 
+class PersonalBlockSpec(BaseModel):
+    """A user-defined block / wing inside a personal building.
+
+    Each block covers a contiguous range of floors. Floors can be
+    negative (basements) so we don't impose a >= 0 constraint.
+    """
+    name: str
+    startFloor: int
+    endFloor: int
+
+
 class PersonalBuildingCreate(BaseModel):
     name: str
     city: str | None = None
+    blocks: list[PersonalBlockSpec] | None = None
+    # Legacy fields retained so older clients on cached bundles still
+    # succeed; preferred new shape is `blocks`.
     floorCount: int | None = None
     zoneCount: int | None = None
-    # Legacy fields retained so older clients on cached bundles still
-    # succeed; preferred new fields are floorCount / zoneCount.
     floor: str | None = None
     zone: str | None = None
 
 
 class PersonalRoomAdd(BaseModel):
-    room: str
+    """Body for adding a room to a personal building.
+
+    The structured fields (block / floor / label) are preferred. The
+    free-form `room` field is accepted for older clients and gets
+    stored as a label-only entry."""
+    block: str | None = None
+    floor: int | None = None
+    label: str | None = None
+    room: str | None = None
 
 
 class PersonalRoomRemove(BaseModel):
-    room: str
+    """Match by structured fields when present, else by legacy label."""
+    block: str | None = None
+    floor: int | None = None
+    label: str | None = None
+    room: str | None = None
+
+
+_MAX_PERSONAL_BLOCKS = 10
+_MAX_PERSONAL_ROOMS = 50
 
 
 PERSONAL_BUILDING_LIMIT = 3
@@ -372,11 +400,37 @@ async def create_personal_building(
     legacy_zone = (body.zone or "").strip() or None
     city = (body.city or "").strip() or None
 
+    blocks: list[dict] = []
+    if body.blocks:
+        if len(body.blocks) > _MAX_PERSONAL_BLOCKS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Up to {_MAX_PERSONAL_BLOCKS} blocks per building",
+            )
+        for b in body.blocks:
+            block_name = b.name.strip()
+            if not block_name:
+                raise HTTPException(status_code=400, detail="Block name is required")
+            if b.endFloor < b.startFloor:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Block '{block_name}': end floor must be ≥ start floor",
+                )
+            blocks.append({
+                "name": block_name,
+                "startFloor": b.startFloor,
+                "endFloor": b.endFloor,
+            })
+
     metadata: dict = {
         "isPersonal": True,
         "createdByUserId": user.id,
+        "blocks": blocks,
         "rooms": [],
     }
+    # Legacy keys kept on the row only so older clients can still read
+    # something sensible from existing fields. New clients should ignore
+    # them in favor of `blocks`.
     if body.floorCount is not None and body.floorCount >= 0:
         metadata["floorCount"] = body.floorCount
     if body.zoneCount is not None and body.zoneCount >= 0:
@@ -428,6 +482,39 @@ async def _load_owned_personal_building(
     return building
 
 
+def _normalize_room_entry(
+    block: str | None,
+    floor: int | None,
+    label: str | None,
+    legacy_room: str | None,
+) -> dict:
+    """Build the canonical {block, floor, label} dict.
+
+    Older clients send `room` as a single string; we store that as a
+    label-only entry so they keep working. Newer clients send the
+    structured fields directly.
+    """
+    out: dict = {}
+    if block and block.strip():
+        out["block"] = block.strip()
+    if floor is not None:
+        out["floor"] = int(floor)
+    if label and label.strip():
+        out["label"] = label.strip()
+    elif legacy_room and legacy_room.strip():
+        out["label"] = legacy_room.strip()
+    return out
+
+
+def _rooms_match(a: dict, b: dict) -> bool:
+    """Compare two room entries by their full identity (block/floor/label)."""
+    return (
+        a.get("block") == b.get("block")
+        and a.get("floor") == b.get("floor")
+        and a.get("label") == b.get("label")
+    )
+
+
 @router.post("/personal/{building_id}/rooms", status_code=200)
 async def add_personal_room(
     building_id: str,
@@ -435,22 +522,41 @@ async def add_personal_room(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Add a room label to a personal building. Idempotent; max 50 rooms."""
+    """Add a room to a personal building. Idempotent; max 50 rooms.
+
+    Accepts either the structured `{block, floor, label}` shape or a
+    legacy free-form `room` string for backward compat.
+    """
     building = await _load_owned_personal_building(building_id, user, db)
-    room = body.room.strip()
-    if not room:
+
+    new_room = _normalize_room_entry(body.block, body.floor, body.label, body.room)
+    if "label" not in new_room:
         raise HTTPException(status_code=400, detail="Room label is required")
 
     meta = dict(building.metadata_) if isinstance(building.metadata_, dict) else {}
-    rooms = list(meta.get("rooms") or [])
-    if room not in rooms:
-        if len(rooms) >= 50:
-            raise HTTPException(status_code=400, detail="Maximum of 50 rooms per personal building")
-        rooms.append(room)
-    meta["rooms"] = rooms
-    # SQLAlchemy needs a new dict reference to mark the JSON column dirty.
-    building.metadata_ = meta
+    rooms_raw = list(meta.get("rooms") or [])
 
+    # Normalize any legacy string rooms to dict form on the fly.
+    rooms: list[dict] = []
+    for r in rooms_raw:
+        if isinstance(r, str):
+            rooms.append({"label": r})
+        elif isinstance(r, dict):
+            rooms.append(r)
+
+    if any(_rooms_match(r, new_room) for r in rooms):
+        # Already present — return as-is.
+        meta["rooms"] = rooms
+    else:
+        if len(rooms) >= _MAX_PERSONAL_ROOMS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Maximum of {_MAX_PERSONAL_ROOMS} rooms per personal building",
+            )
+        rooms.append(new_room)
+        meta["rooms"] = rooms
+
+    building.metadata_ = meta
     await db.commit()
     await db.refresh(building)
     return building.to_api_dict()
@@ -463,15 +569,28 @@ async def remove_personal_room(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Remove a room label from a personal building."""
+    """Remove a room from a personal building (by structured fields or legacy label)."""
     building = await _load_owned_personal_building(building_id, user, db)
-    room = body.room.strip()
+
+    target = _normalize_room_entry(body.block, body.floor, body.label, body.room)
+    if not target:
+        raise HTTPException(status_code=400, detail="Room to remove is required")
 
     meta = dict(building.metadata_) if isinstance(building.metadata_, dict) else {}
-    rooms = [r for r in (meta.get("rooms") or []) if r != room]
+    rooms_raw = list(meta.get("rooms") or [])
+    rooms: list[dict] = []
+    for r in rooms_raw:
+        if isinstance(r, str):
+            entry = {"label": r}
+        elif isinstance(r, dict):
+            entry = r
+        else:
+            continue
+        if not _rooms_match(entry, target):
+            rooms.append(entry)
+
     meta["rooms"] = rooms
     building.metadata_ = meta
-
     await db.commit()
     await db.refresh(building)
     return building.to_api_dict()
