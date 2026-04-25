@@ -604,24 +604,30 @@ async def remove_personal_room(
 
 
 # Tables with an FK to buildings.id that need to be cleaned up before
-# the building row itself can be deleted. Order matters only insofar as
-# any table referenced by another (e.g. chat_sessions → chat_messages
-# via ON DELETE CASCADE) clears its dependents automatically.
+# the building row itself can be deleted. Order matters because some of
+# these tables also reference each other:
+#   building_telemetry_config.sensor_id → sensors
+#   telemetry_readings.sensor_id        → sensors
+#   sensors.location_id, .zone_id,
+#   .telemetry_endpoint_id              → locations / zones / telemetry_endpoints
+#   zones.parent_location_id            → locations
+#   telemetry_endpoints.location_id     → locations
+# So children must appear before their parents in this list.
 _BUILDING_FK_TABLES: tuple[str, ...] = (
     "user_building_access",
     "building_configs",
     "building_tenants",
     "building_connectors",
-    "building_telemetry_config",
     "presence_events",
     "beacons",
-    "sensors",
-    "telemetry_readings",
-    "telemetry_endpoints",
     "votes",
     "complaints",
     "fm_role_requests",
     "chat_sessions",
+    "building_telemetry_config",
+    "telemetry_readings",
+    "sensors",
+    "telemetry_endpoints",
     "zones",
     "locations",
 )
