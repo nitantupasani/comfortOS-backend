@@ -657,9 +657,15 @@ async def _cascade_delete_building(building: Building, db: AsyncSession) -> None
                 detail=f"Cleanup failed on table '{table}': {exc!s}",
             ) from exc
 
+    # Use raw SQL (not db.delete()) so the ORM doesn't try to UPDATE
+    # cached related rows (BuildingConfig, etc.) we already wiped above.
     try:
         async with db.begin_nested():
-            await db.delete(building)
+            await db.execute(
+                text("DELETE FROM buildings WHERE id = :bid"),
+                {"bid": building.id},
+            )
+        db.expunge(building)
     except SQLAlchemyError as exc:
         raise HTTPException(
             status_code=500,
