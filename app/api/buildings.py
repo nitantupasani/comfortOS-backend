@@ -627,6 +627,22 @@ _BUILDING_FK_TABLES: tuple[str, ...] = (
 )
 
 
+async def _cascade_delete_building(building: Building, db: AsyncSession) -> None:
+    """Delete a building row plus all FK-dependent rows.
+
+    Iterates ``_BUILDING_FK_TABLES`` (hard-coded literals) and deletes
+    matching rows before removing the building itself. Caller commits.
+    """
+    from sqlalchemy import text
+
+    for table in _BUILDING_FK_TABLES:
+        await db.execute(
+            text(f"DELETE FROM {table} WHERE building_id = :bid"),
+            {"bid": building.id},
+        )
+    await db.delete(building)
+
+
 @router.post("/personal/{building_id}/delete", status_code=204)
 async def delete_personal_building(
     building_id: str,
@@ -637,13 +653,7 @@ async def delete_personal_building(
 
     POST is used instead of DELETE because some hosting layers in front
     of the API are flaky with DELETE methods.
-
-    Cascades the cleanup across every table that has an FK to
-    ``buildings.id`` so a presence-event, chat session, vote, etc. tied
-    to the personal building doesn't pin the row at commit time.
     """
-    from sqlalchemy import text
-
     result = await db.execute(select(Building).where(Building.id == building_id))
     building = result.scalar_one_or_none()
     if building is None:
@@ -653,14 +663,31 @@ async def delete_personal_building(
     if not (meta.get("isPersonal") and meta.get("createdByUserId") == user.id):
         raise HTTPException(status_code=403, detail="Not your personal building")
 
-    for table in _BUILDING_FK_TABLES:
-        # Each table name is a hard-coded literal from _BUILDING_FK_TABLES
-        # (no user input), so the f-string interpolation is safe.
-        await db.execute(
-            text(f"DELETE FROM {table} WHERE building_id = :bid"),
-            {"bid": building_id},
-        )
-    await db.delete(building)
+    await _cascade_delete_building(building, db)
+    await db.commit()
+    return Response(status_code=204)
+
+
+@router.post("/{building_id}/delete", status_code=204)
+async def delete_building(
+    building_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin-only hard delete of a building, cascading FK dependents.
+
+    POST instead of DELETE for the same hosting-layer reasons as the
+    personal-building variant.
+    """
+    if user.role != UserRole.admin:
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    result = await db.execute(select(Building).where(Building.id == building_id))
+    building = result.scalar_one_or_none()
+    if building is None:
+        raise HTTPException(status_code=404, detail="Building not found")
+
+    await _cascade_delete_building(building, db)
     await db.commit()
     return Response(status_code=204)
 
