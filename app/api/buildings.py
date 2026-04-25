@@ -59,8 +59,20 @@ class BuildingConfigUpdate(BaseModel):
 class PersonalBuildingCreate(BaseModel):
     name: str
     city: str | None = None
+    floorCount: int | None = None
+    zoneCount: int | None = None
+    # Legacy fields retained so older clients on cached bundles still
+    # succeed; preferred new fields are floorCount / zoneCount.
     floor: str | None = None
     zone: str | None = None
+
+
+class PersonalRoomAdd(BaseModel):
+    room: str
+
+
+class PersonalRoomRemove(BaseModel):
+    room: str
 
 
 PERSONAL_BUILDING_LIMIT = 3
@@ -340,9 +352,10 @@ async def create_personal_building(
 ):
     """Occupant self-registers a building (max 3 per user).
 
-    Stores `{isPersonal, createdByUserId, floor, zone}` in `metadata_`,
-    grants the user access via `UserBuildingAccess`, and seeds a
-    `BuildingConfig` with the default comfort vote form.
+    Stores `{isPersonal, createdByUserId, floorCount, zoneCount,
+    rooms}` in `metadata_` (with legacy `floor` / `zone` kept for old
+    clients), grants the user access via `UserBuildingAccess`, and
+    seeds a `BuildingConfig` with the default comfort vote form.
     """
     name = body.name.strip()
     if not name:
@@ -355,18 +368,23 @@ async def create_personal_building(
             detail=f"You can add up to {PERSONAL_BUILDING_LIMIT} personal buildings",
         )
 
-    floor = (body.floor or "").strip() or None
-    zone = (body.zone or "").strip() or None
+    legacy_floor = (body.floor or "").strip() or None
+    legacy_zone = (body.zone or "").strip() or None
     city = (body.city or "").strip() or None
 
-    metadata = {
+    metadata: dict = {
         "isPersonal": True,
         "createdByUserId": user.id,
+        "rooms": [],
     }
-    if floor:
-        metadata["floor"] = floor
-    if zone:
-        metadata["zone"] = zone
+    if body.floorCount is not None and body.floorCount >= 0:
+        metadata["floorCount"] = body.floorCount
+    if body.zoneCount is not None and body.zoneCount >= 0:
+        metadata["zoneCount"] = body.zoneCount
+    if legacy_floor:
+        metadata["floor"] = legacy_floor
+    if legacy_zone:
+        metadata["zone"] = legacy_zone
 
     building = Building(
         name=name,
@@ -390,6 +408,69 @@ async def create_personal_building(
         vote_form_schema=_DEFAULT_PERSONAL_VOTE_FORM,
         is_active=True,
     ))
+
+    await db.commit()
+    await db.refresh(building)
+    return building.to_api_dict()
+
+
+async def _load_owned_personal_building(
+    building_id: str, user: User, db: AsyncSession
+) -> Building:
+    """Load a building and verify the caller is its personal-building owner."""
+    result = await db.execute(select(Building).where(Building.id == building_id))
+    building = result.scalar_one_or_none()
+    if building is None:
+        raise HTTPException(status_code=404, detail="Building not found")
+    meta = building.metadata_ if isinstance(building.metadata_, dict) else {}
+    if not (meta.get("isPersonal") and meta.get("createdByUserId") == user.id):
+        raise HTTPException(status_code=403, detail="Not your personal building")
+    return building
+
+
+@router.post("/personal/{building_id}/rooms", status_code=200)
+async def add_personal_room(
+    building_id: str,
+    body: PersonalRoomAdd,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Add a room label to a personal building. Idempotent; max 50 rooms."""
+    building = await _load_owned_personal_building(building_id, user, db)
+    room = body.room.strip()
+    if not room:
+        raise HTTPException(status_code=400, detail="Room label is required")
+
+    meta = dict(building.metadata_) if isinstance(building.metadata_, dict) else {}
+    rooms = list(meta.get("rooms") or [])
+    if room not in rooms:
+        if len(rooms) >= 50:
+            raise HTTPException(status_code=400, detail="Maximum of 50 rooms per personal building")
+        rooms.append(room)
+    meta["rooms"] = rooms
+    # SQLAlchemy needs a new dict reference to mark the JSON column dirty.
+    building.metadata_ = meta
+
+    await db.commit()
+    await db.refresh(building)
+    return building.to_api_dict()
+
+
+@router.post("/personal/{building_id}/rooms/remove", status_code=200)
+async def remove_personal_room(
+    building_id: str,
+    body: PersonalRoomRemove,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove a room label from a personal building."""
+    building = await _load_owned_personal_building(building_id, user, db)
+    room = body.room.strip()
+
+    meta = dict(building.metadata_) if isinstance(building.metadata_, dict) else {}
+    rooms = [r for r in (meta.get("rooms") or []) if r != room]
+    meta["rooms"] = rooms
+    building.metadata_ = meta
 
     await db.commit()
     await db.refresh(building)
