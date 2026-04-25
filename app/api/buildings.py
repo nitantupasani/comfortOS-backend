@@ -637,16 +637,34 @@ async def _cascade_delete_building(building: Building, db: AsyncSession) -> None
     """Delete a building row plus all FK-dependent rows.
 
     Iterates ``_BUILDING_FK_TABLES`` (hard-coded literals) and deletes
-    matching rows before removing the building itself. Caller commits.
+    matching rows before removing the building itself. Each table delete
+    runs inside its own SAVEPOINT so a failure surfaces the offending
+    table name in the HTTP response instead of a bare 500. Caller commits.
     """
     from sqlalchemy import text
+    from sqlalchemy.exc import SQLAlchemyError
 
     for table in _BUILDING_FK_TABLES:
-        await db.execute(
-            text(f"DELETE FROM {table} WHERE building_id = :bid"),
-            {"bid": building.id},
-        )
-    await db.delete(building)
+        try:
+            async with db.begin_nested():
+                await db.execute(
+                    text(f"DELETE FROM {table} WHERE building_id = :bid"),
+                    {"bid": building.id},
+                )
+        except SQLAlchemyError as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Cleanup failed on table '{table}': {exc!s}",
+            ) from exc
+
+    try:
+        async with db.begin_nested():
+            await db.delete(building)
+    except SQLAlchemyError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Final building delete failed: {exc!s}",
+        ) from exc
 
 
 @router.post("/personal/{building_id}/delete", status_code=204)
