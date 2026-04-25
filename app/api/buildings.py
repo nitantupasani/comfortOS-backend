@@ -28,6 +28,12 @@ from ..models.building_tenant import BuildingTenant
 from ..models.building_config import BuildingConfig
 from ..models.user_building_access import UserBuildingAccess
 from ..models.vote import Vote
+from ..models.location import Location
+from ..services.personal_locations import (
+    floor_num_from_location,
+    materialize_personal_locations,
+    project_locations_to_metadata,
+)
 
 
 # ── Request schemas ───────────────────────────────────────────────────────────
@@ -71,6 +77,10 @@ class PersonalBuildingCreate(BaseModel):
     name: str
     city: str | None = None
     blocks: list[PersonalBlockSpec] | None = None
+    # Default True keeps the apartment-privacy contract for occupants
+    # who don't explicitly opt in. Set False for shared/office buildings
+    # so other users can find and vote on them.
+    requiresAccessPermission: bool = True
     # Legacy fields retained so older clients on cached bundles still
     # succeed; preferred new shape is `blocks`.
     floorCount: int | None = None
@@ -376,6 +386,9 @@ async def list_personal_buildings(
 ):
     """List the buildings this occupant self-registered."""
     buildings = await _list_personal_buildings_for_user(user.id, db)
+    for b in buildings:
+        await materialize_personal_locations(b, db)
+        await project_locations_to_metadata(b, db)
     return [b.to_api_dict() for b in buildings]
 
 
@@ -451,7 +464,7 @@ async def create_personal_building(
         name=name,
         address=name,
         city=city,
-        requires_access_permission=True,
+        requires_access_permission=body.requiresAccessPermission,
         metadata_=metadata,
     )
     db.add(building)
@@ -469,6 +482,8 @@ async def create_personal_building(
         vote_form_schema=_DEFAULT_PERSONAL_VOTE_FORM,
         is_active=True,
     ))
+
+    await materialize_personal_locations(building, db)
 
     await db.commit()
     await db.refresh(building)
@@ -522,6 +537,33 @@ def _rooms_match(a: dict, b: dict) -> bool:
     )
 
 
+async def _find_personal_floor_location(
+    building_id: str, block_name: str, floor_num: int, db: AsyncSession
+) -> Location | None:
+    """Return the floor Location matching (block, floor) for a personal building, or None."""
+    block_result = await db.execute(
+        select(Location).where(
+            Location.building_id == building_id,
+            Location.type == "block_or_wing",
+            Location.name == block_name,
+        )
+    )
+    block_loc = block_result.scalars().first()
+    if block_loc is None:
+        return None
+    floor_result = await db.execute(
+        select(Location).where(
+            Location.building_id == building_id,
+            Location.parent_id == block_loc.id,
+            Location.type == "floor",
+        )
+    )
+    for floor_loc in floor_result.scalars().all():
+        if floor_num_from_location(floor_loc) == floor_num:
+            return floor_loc
+    return None
+
+
 @router.post("/personal/{building_id}/rooms", status_code=200)
 async def add_personal_room(
     building_id: str,
@@ -540,30 +582,83 @@ async def add_personal_room(
     if "label" not in new_room:
         raise HTTPException(status_code=400, detail="Room label is required")
 
-    meta = dict(building.metadata_) if isinstance(building.metadata_, dict) else {}
-    rooms_raw = list(meta.get("rooms") or [])
+    await materialize_personal_locations(building, db)
 
-    # Normalize any legacy string rooms to dict form on the fly.
-    rooms: list[dict] = []
-    for r in rooms_raw:
-        if isinstance(r, str):
-            rooms.append({"label": r})
-        elif isinstance(r, dict):
-            rooms.append(r)
+    block_name = new_room.get("block")
+    floor_num = new_room.get("floor")
+    label = new_room["label"]
 
-    if any(_rooms_match(r, new_room) for r in rooms):
-        # Already present — return as-is.
-        meta["rooms"] = rooms
-    else:
-        if len(rooms) >= _MAX_PERSONAL_ROOMS:
+    if block_name and floor_num is not None:
+        floor_loc = await _find_personal_floor_location(
+            building.id, block_name, int(floor_num), db,
+        )
+        if floor_loc is None:
             raise HTTPException(
                 status_code=400,
-                detail=f"Maximum of {_MAX_PERSONAL_ROOMS} rooms per personal building",
+                detail=f"Floor {floor_num} of block '{block_name}' is not part of this building",
             )
-        rooms.append(new_room)
-        meta["rooms"] = rooms
 
-    building.metadata_ = meta
+        existing = await db.execute(
+            select(Location).where(
+                Location.building_id == building.id,
+                Location.parent_id == floor_loc.id,
+                Location.type == "room",
+                Location.name == label,
+            )
+        )
+        if existing.scalar_one_or_none() is None:
+            count_result = await db.execute(
+                select(func.count())
+                .select_from(Location)
+                .where(
+                    Location.building_id == building.id,
+                    Location.type == "room",
+                )
+            )
+            if (count_result.scalar() or 0) >= _MAX_PERSONAL_ROOMS:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Maximum of {_MAX_PERSONAL_ROOMS} rooms per personal building",
+                )
+            sort_result = await db.execute(
+                select(func.coalesce(func.max(Location.sort_order), -1))
+                .where(
+                    Location.building_id == building.id,
+                    Location.parent_id == floor_loc.id,
+                    Location.type == "room",
+                )
+            )
+            next_sort = (sort_result.scalar() or -1) + 1
+            db.add(
+                Location(
+                    building_id=building.id,
+                    parent_id=floor_loc.id,
+                    type="room",
+                    name=label,
+                    sort_order=next_sort,
+                )
+            )
+            await db.flush()
+    else:
+        meta = dict(building.metadata_) if isinstance(building.metadata_, dict) else {}
+        rooms_raw = list(meta.get("rooms") or [])
+        rooms: list[dict] = []
+        for r in rooms_raw:
+            if isinstance(r, str):
+                rooms.append({"label": r})
+            elif isinstance(r, dict):
+                rooms.append(r)
+        if not any(_rooms_match(r, new_room) for r in rooms):
+            if len(rooms) >= _MAX_PERSONAL_ROOMS:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Maximum of {_MAX_PERSONAL_ROOMS} rooms per personal building",
+                )
+            rooms.append(new_room)
+        meta["rooms"] = rooms
+        building.metadata_ = meta
+
+    await project_locations_to_metadata(building, db)
     await db.commit()
     await db.refresh(building)
     return building.to_api_dict()
@@ -583,21 +678,46 @@ async def remove_personal_room(
     if not target:
         raise HTTPException(status_code=400, detail="Room to remove is required")
 
-    meta = dict(building.metadata_) if isinstance(building.metadata_, dict) else {}
-    rooms_raw = list(meta.get("rooms") or [])
-    rooms: list[dict] = []
-    for r in rooms_raw:
-        if isinstance(r, str):
-            entry = {"label": r}
-        elif isinstance(r, dict):
-            entry = r
-        else:
-            continue
-        if not _rooms_match(entry, target):
-            rooms.append(entry)
+    await materialize_personal_locations(building, db)
 
-    meta["rooms"] = rooms
-    building.metadata_ = meta
+    block_name = target.get("block")
+    floor_num = target.get("floor")
+    label = target.get("label")
+
+    if block_name and floor_num is not None and label:
+        floor_loc = await _find_personal_floor_location(
+            building.id, block_name, int(floor_num), db,
+        )
+        if floor_loc is not None:
+            existing = await db.execute(
+                select(Location).where(
+                    Location.building_id == building.id,
+                    Location.parent_id == floor_loc.id,
+                    Location.type == "room",
+                    Location.name == label,
+                )
+            )
+            room_loc = existing.scalar_one_or_none()
+            if room_loc is not None:
+                await db.delete(room_loc)
+                await db.flush()
+    else:
+        meta = dict(building.metadata_) if isinstance(building.metadata_, dict) else {}
+        rooms_raw = list(meta.get("rooms") or [])
+        rooms: list[dict] = []
+        for r in rooms_raw:
+            if isinstance(r, str):
+                entry = {"label": r}
+            elif isinstance(r, dict):
+                entry = r
+            else:
+                continue
+            if not _rooms_match(entry, target):
+                rooms.append(entry)
+        meta["rooms"] = rooms
+        building.metadata_ = meta
+
+    await project_locations_to_metadata(building, db)
     await db.commit()
     await db.refresh(building)
     return building.to_api_dict()

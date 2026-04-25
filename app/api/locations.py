@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
 from ..api.deps import get_current_user
+from ..models.building import Building
 from ..models.user import User, UserRole
 from ..models.location import Location
 from ..schemas.location import (
@@ -22,6 +23,27 @@ from ..schemas.location import (
     LocationBatchCreate,
     LocationTreeNode,
 )
+from ..services.personal_locations import (
+    materialize_personal_locations,
+    project_locations_to_metadata,
+)
+
+
+async def _ensure_personal_locations(building_id: str, db: AsyncSession) -> None:
+    """Back-fill Location rows on first read for personal buildings created before we materialized them."""
+    building = await db.get(Building, building_id)
+    if building is None:
+        return
+    if await materialize_personal_locations(building, db):
+        await db.commit()
+
+
+async def _sync_personal_metadata(building_id: str, db: AsyncSession) -> None:
+    """If the target building is personal, rebuild metadata.blocks/rooms from the current Location rows."""
+    building = await db.get(Building, building_id)
+    if building is None:
+        return
+    await project_locations_to_metadata(building, db)
 
 router = APIRouter(prefix="/locations", tags=["locations"])
 
@@ -36,6 +58,7 @@ async def list_locations(
     db: AsyncSession = Depends(get_db),
 ):
     """List all locations for a building, optionally filtered by type."""
+    await _ensure_personal_locations(building_id, db)
     stmt = (
         select(Location)
         .where(Location.building_id == building_id)
@@ -54,6 +77,7 @@ async def get_location_tree(
     db: AsyncSession = Depends(get_db),
 ):
     """Return the full location hierarchy as a nested tree."""
+    await _ensure_personal_locations(building_id, db)
     result = await db.execute(
         select(Location)
         .where(Location.building_id == building_id)
@@ -126,6 +150,7 @@ async def create_location(
     db.add(loc)
     await db.flush()
     await db.refresh(loc)
+    await _sync_personal_metadata(body.buildingId, db)
     return loc.to_api_dict()
 
 
@@ -161,6 +186,7 @@ async def create_locations_batch(
     await db.flush()
     for loc in created:
         await db.refresh(loc)
+    await _sync_personal_metadata(body.buildingId, db)
     return [loc.to_api_dict() for loc in created]
 
 
@@ -190,6 +216,7 @@ async def update_location(
 
     await db.flush()
     await db.refresh(loc)
+    await _sync_personal_metadata(loc.building_id, db)
     return loc.to_api_dict()
 
 
@@ -214,4 +241,7 @@ async def delete_location(
     if result.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="Cannot delete location with children")
 
+    building_id = loc.building_id
     await db.delete(loc)
+    await db.flush()
+    await _sync_personal_metadata(building_id, db)
