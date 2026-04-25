@@ -396,13 +396,47 @@ async def create_personal_building(
     return building.to_api_dict()
 
 
-@router.delete("/personal/{building_id}", status_code=204)
+# Tables with an FK to buildings.id that need to be cleaned up before
+# the building row itself can be deleted. Order matters only insofar as
+# any table referenced by another (e.g. chat_sessions → chat_messages
+# via ON DELETE CASCADE) clears its dependents automatically.
+_BUILDING_FK_TABLES: tuple[str, ...] = (
+    "user_building_access",
+    "building_configs",
+    "building_tenants",
+    "building_connectors",
+    "building_telemetry_config",
+    "presence_events",
+    "beacons",
+    "sensors",
+    "telemetry_readings",
+    "telemetry_endpoints",
+    "votes",
+    "complaints",
+    "fm_role_requests",
+    "chat_sessions",
+    "zones",
+    "locations",
+)
+
+
+@router.post("/personal/{building_id}/delete", status_code=204)
 async def delete_personal_building(
     building_id: str,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Remove a personal building the caller created."""
+    """Remove a personal building the caller created.
+
+    POST is used instead of DELETE because some hosting layers in front
+    of the API are flaky with DELETE methods.
+
+    Cascades the cleanup across every table that has an FK to
+    ``buildings.id`` so a presence-event, chat session, vote, etc. tied
+    to the personal building doesn't pin the row at commit time.
+    """
+    from sqlalchemy import text
+
     result = await db.execute(select(Building).where(Building.id == building_id))
     building = result.scalar_one_or_none()
     if building is None:
@@ -412,16 +446,13 @@ async def delete_personal_building(
     if not (meta.get("isPersonal") and meta.get("createdByUserId") == user.id):
         raise HTTPException(status_code=403, detail="Not your personal building")
 
-    await db.execute(
-        UserBuildingAccess.__table__.delete().where(
-            UserBuildingAccess.building_id == building_id
+    for table in _BUILDING_FK_TABLES:
+        # Each table name is a hard-coded literal from _BUILDING_FK_TABLES
+        # (no user input), so the f-string interpolation is safe.
+        await db.execute(
+            text(f"DELETE FROM {table} WHERE building_id = :bid"),
+            {"bid": building_id},
         )
-    )
-    await db.execute(
-        BuildingConfig.__table__.delete().where(
-            BuildingConfig.building_id == building_id
-        )
-    )
     await db.delete(building)
     await db.commit()
     return Response(status_code=204)
