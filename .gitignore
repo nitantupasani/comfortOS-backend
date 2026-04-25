@@ -61,3 +61,6 @@ node_modules/
 # Ignore build artifacts
 build/
 dist/
+
+# Graphify knowledge graph output
+graphify-out/
