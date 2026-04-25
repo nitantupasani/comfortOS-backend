@@ -26,7 +26,22 @@ def _floor_label(n: int) -> str:
 
 
 def floor_num_from_location(loc: Location) -> int | None:
-    """Recover the integer floor number from a 'floor' Location, or None."""
+    """Recover the integer floor number from a 'floor' Location, or None.
+
+    Checks `metadata.floorNumber` first (canonical, set by the materializer
+    and preserved across renames). Falls back to parsing `code="F2"` or
+    name patterns for legacy rows that pre-date the metadata field.
+    """
+    if isinstance(loc.metadata_, dict):
+        raw = loc.metadata_.get("floorNumber")
+        if isinstance(raw, int):
+            return raw
+        if isinstance(raw, str) and raw.strip():
+            try:
+                return int(raw.strip())
+            except ValueError:
+                pass
+
     code = (loc.code or "").strip()
     if code and code[0] in ("F", "f"):
         try:
@@ -110,6 +125,7 @@ async def materialize_personal_locations(
                 name=_floor_label(fnum),
                 code=f"F{fnum}",
                 sort_order=fi,
+                metadata_={"floorNumber": fnum},
             )
             db.add(floor_node)
             await db.flush()
