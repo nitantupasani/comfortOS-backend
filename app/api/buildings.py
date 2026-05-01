@@ -115,62 +115,111 @@ _MAX_PERSONAL_ROOMS = 50
 
 PERSONAL_BUILDING_LIMIT = 3
 
-# Default vote form seeded for personal buildings. Uses the canonical
-# -3..+3 thermal scale so the web VoteFormRenderer (clamped to ±3)
+# Default vote form seeded for personal buildings. Field choices are
+# grounded in established indoor environment research:
+#   * thermal_sensation : ASHRAE 55 7-point scale (Fanger PMV)
+#   * thermal_preference: McIntyre 3-point preference
+#   * thermal_acceptable: ASHRAE 55 acceptability (binary)
+#   * air_quality       : 5-point semantic differential
+#   * acoustic_comfort  : 5-point centered preference (no stars)
+#   * adaptive_actions  : de Dear / Brager adaptive comfort framework
+#
+# Uses the canonical -3..+3 thermal scale so the web VoteFormRenderer (clamped to ±3)
 # shows all 7 options; Flutter renders any min..max range, so it works
 # there too.
 _DEFAULT_PERSONAL_VOTE_FORM: dict = {
-    "schemaVersion": 2,
-    "formTitle": "Comfort Vote",
-    "formDescription": "Quick survey about your environment – takes under a minute.",
+    "schemaVersion": 3,
+    "formTitle": "Comfort check-in",
+    "formDescription": "About 30 seconds. Helps the building tune to how you feel right now.",
     "thanksMessage": "Thanks for your feedback!",
     "allowAnonymous": False,
     "cooldownMinutes": 30,
     "fields": [
         {
-            "key": "thermal_comfort",
+            "key": "thermal_sensation",
             "type": "thermal_scale",
-            "question": "How hot or cold do you feel?",
+            "question": "How do you feel right now?",
+            "required": True,
             "min": -3,
             "max": 3,
             "defaultValue": 0,
             "labels": {
                 "-3": "Cold",
                 "-2": "Cool",
-                "-1": "Slightly Cool",
-                "0": "Neutral",
-                "1": "Slightly Warm",
-                "2": "Warm",
-                "3": "Hot",
+                "-1": "Slightly cool",
+                "0":  "Neutral",
+                "1":  "Slightly warm",
+                "2":  "Warm",
+                "3":  "Hot",
             },
+            "hint": "ASHRAE 7-point thermal sensation",
         },
         {
             "key": "thermal_preference",
             "type": "single_select",
-            "question": "Do you want to be warmer or cooler?",
+            "question": "Right now, you would prefer to be:",
+            "required": True,
             "options": [
-                {"label": "Warmer", "value": 1, "color": "orange", "emoji": "🔥"},
-                {"label": "I am good", "value": 2, "color": "green", "emoji": "👍"},
-                {"label": "Cooler", "value": 3, "color": "blue", "emoji": "❄️"},
+                {"label": "Cooler",    "value": -1, "color": "blue",   "emoji": "❄️"},
+                {"label": "No change", "value": 0,  "color": "green",  "emoji": "👍"},
+                {"label": "Warmer",    "value": 1,  "color": "orange", "emoji": "🔥"},
             ],
         },
         {
+            "key": "thermal_acceptable",
+            "type": "yes_no",
+            "question": "Is the temperature acceptable to you?",
+            "required": True,
+            "yesLabel": "Acceptable",
+            "noLabel":  "Not acceptable",
+        },
+        {
             "key": "air_quality",
-            "type": "multi_select",
-            "question": "What do you think about the air quality?",
+            "type": "single_select",
+            "question": "How is the air in here?",
+            "required": True,
             "options": [
-                {"label": "Suffocating", "value": "suffocating", "emoji": "😤"},
-                {"label": "Humid", "value": "humid", "emoji": "💧"},
-                {"label": "Dry", "value": "dry", "emoji": "🏜️"},
-                {"label": "Smelly", "value": "smelly", "emoji": "🤢"},
-                {
-                    "label": "All good!",
-                    "value": "all_good",
-                    "exclusive": True,
-                    "color": "green",
-                    "emoji": "✅",
-                },
+                {"label": "Very stuffy", "value": 1, "color": "red"},
+                {"label": "Stuffy",      "value": 2, "color": "orange"},
+                {"label": "Neutral",     "value": 3, "color": "amber"},
+                {"label": "Fresh",       "value": 4, "color": "teal"},
+                {"label": "Very fresh",  "value": 5, "color": "green"},
             ],
+        },
+        {
+            "key": "acoustic_comfort",
+            "type": "single_select",
+            "question": "How is the sound level?",
+            "required": False,
+            "options": [
+                {"label": "Much too quiet",  "value": -2, "color": "blue"},
+                {"label": "A bit too quiet", "value": -1, "color": "cyan"},
+                {"label": "Just right",      "value": 0,  "color": "green"},
+                {"label": "A bit too noisy", "value": 1,  "color": "amber"},
+                {"label": "Much too noisy",  "value": 2,  "color": "red"},
+            ],
+        },
+        {
+            "key": "adaptive_actions",
+            "type": "multi_select",
+            "question": "Anything you have already tried?",
+            "required": False,
+            "options": [
+                {"label": "Added a layer",     "value": "added_layer",   "emoji": "🧥"},
+                {"label": "Removed a layer",   "value": "removed_layer", "emoji": "👕"},
+                {"label": "Opened a window",   "value": "opened_window", "emoji": "🪟"},
+                {"label": "Used a fan",        "value": "fan",           "emoji": "🌀"},
+                {"label": "Moved seats",       "value": "moved",         "emoji": "🚶"},
+                {"label": "Hot or cold drink", "value": "drink",         "emoji": "☕"},
+                {"label": "Nothing",           "value": "none", "exclusive": True, "color": "grey"},
+            ],
+        },
+        {
+            "key": "comments",
+            "type": "text_input",
+            "question": "Anything else? (optional)",
+            "required": False,
+            "maxLength": 280,
         },
     ],
 }
