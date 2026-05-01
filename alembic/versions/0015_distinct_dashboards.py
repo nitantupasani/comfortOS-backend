@@ -6,17 +6,17 @@ which hid the diversity ComfortOS server-driven UI is meant to demonstrate.
 This migration writes two purpose-built layouts that exercise different
 SDUI primitives, chart types, and overall UX shapes:
 
-  - HHS (bldg-5e32215a) — university open-plan office, 28 strips on a
-    single floor. Operations / control-center feel: KPI grid, a
-    floor-wide temperature heatmap, an AREA telemetry chart for
-    temperature trends, a BAR telemetry chart for live CO₂ ranking,
-    a static hottest-strips bar list, and a CO₂ alert banner.
+  - HHS (bldg-5e32215a) — university open-plan office. The location
+    hierarchy is flat (no floors/wings). Layout: KPI grid, then a single
+    temperature chart and a single CO₂ chart, both in `pick` mode so the
+    occupant can choose any room from a dropdown. Closes with a
+    hottest-rooms bar list and a CO₂ alert.
 
-  - Building 28 (bldg-28) — typical university office building with
-    individual offices and meeting rooms. Occupant / room-booking feel:
-    radial gauges (temperature, CO₂), comfort progress bars, a meeting
-    room availability bar list, today's schedule, HVAC mode badges,
-    and a comfort-vote primary action.
+  - Building 28 (bldg-28) — typical university office with multiple
+    floors and two wings (E/W). Layout: gauges for the current room,
+    comfort progress bars, then four telemetry charts that lock the
+    grouping mode to compare floors against floors and wings against
+    wings, for both temperature and CO₂. No schedule items.
 
 Any pre-existing telemetryApiKey on the active config is preserved.
 
@@ -40,26 +40,8 @@ HHS_BUILDING_ID = "bldg-5e32215a"
 B28_BUILDING_ID = "bldg-28"
 
 
-# ── Demo data for static SDUI widgets ────────────────────────────────
-# These values are illustrative — the live charts pull real telemetry.
-
-HHS_HEATMAP_CELLS = [
-    {"label": "ST01", "value": 21.4}, {"label": "ST02", "value": 22.0},
-    {"label": "ST03", "value": 22.6}, {"label": "ST04", "value": 23.1},
-    {"label": "ST05", "value": 23.8}, {"label": "ST06", "value": 24.2},
-    {"label": "ST07", "value": 24.6}, {"label": "ST08", "value": 23.9},
-    {"label": "ST09", "value": 23.2}, {"label": "ST10", "value": 22.7},
-    {"label": "ST11", "value": 22.3}, {"label": "ST12", "value": 21.9},
-    {"label": "ST13", "value": 21.6}, {"label": "ST14", "value": 25.1},
-    {"label": "ST15", "value": 24.4}, {"label": "ST16", "value": 23.3},
-    {"label": "ST17", "value": 22.8}, {"label": "ST18", "value": 22.1},
-    {"label": "ST19", "value": 21.5}, {"label": "ST20", "value": 21.2},
-    {"label": "ST21", "value": 21.0}, {"label": "ST22", "value": 20.8},
-    {"label": "ST23", "value": 21.4}, {"label": "ST24", "value": 22.2},
-    {"label": "ST25", "value": 23.0}, {"label": "ST26", "value": 23.7},
-    {"label": "ST27", "value": 24.0}, {"label": "ST28", "value": 22.5},
-]
-
+# Static demo data for HHS hottest-rooms bar list (live charts pull real
+# telemetry; this widget is illustrative).
 HHS_HOTTEST = [
     {"label": "ST14", "value": 25.1, "color": "red"},
     {"label": "ST07", "value": 24.6, "color": "orange"},
@@ -68,84 +50,52 @@ HHS_HOTTEST = [
     {"label": "ST26", "value": 23.7, "color": "amber"},
 ]
 
-B28_MEETING_ROOMS = [
-    {"label": "1.W.560", "value": 8, "color": "teal"},
-    {"label": "2.E.340", "value": 6, "color": "teal"},
-    {"label": "4.E.040", "value": 4, "color": "amber"},
-    {"label": "4.E.100", "value": 2, "color": "red"},
-    {"label": "5.W.920", "value": 0, "color": "grey"},
-]
 
-
-# ── HHS: open-plan-office operations dashboard ───────────────────────
+# ── HHS: flat-room office, room-pick chart ──────────────────────────
 HHS_DASHBOARD = {
     "type": "column",
     "crossAxisAlignment": "stretch",
     "children": [
         {
             "type": "image_banner",
-            "title": "HHS office floor — 28 strips",
-            "subtitle": "Open-plan operations · floor 0",
+            "title": "HHS office",
+            "subtitle": "University open-plan workspace",
             "color": "indigo",
         },
         {"type": "spacer", "height": 12},
         {
-            "type": "row",
-            "children": [
-                {
-                    "type": "weather_badge",
-                    "temp": "13",
-                    "unit": "°C",
-                    "label": "The Hague",
-                    "icon": "cloud",
-                },
-                {
-                    "type": "badge_row",
-                    "badges": [
-                        {"label": "BMS connected", "color": "green"},
-                        {"label": "28 strips", "color": "teal"},
-                        {"label": "Floor 0", "color": "indigo"},
-                    ],
-                },
-            ],
+            "type": "weather_badge",
+            "temp": "13",
+            "unit": "°C",
+            "label": "The Hague",
+            "icon": "cloud",
         },
         {"type": "spacer", "height": 16},
-        {"type": "section_header", "title": "Floor pulse", "icon": "monitor_heart"},
+        {"type": "section_header", "title": "Office at a glance", "icon": "monitor_heart"},
         {"type": "spacer", "height": 8},
         {
             "type": "grid",
             "columns": 2,
             "spacing": 10,
             "children": [
-                {"type": "kpi_card", "label": "Avg temperature", "value": "22.7", "unit": "°C", "trend": "up"},
+                {"type": "kpi_card", "label": "Avg temperature", "value": "22.7", "unit": "°C",  "trend": "up"},
                 {"type": "kpi_card", "label": "Avg CO₂",         "value": "612",  "unit": "ppm", "trend": "down"},
-                {"type": "kpi_card", "label": "Strips occupied", "value": "19",   "unit": "/ 28", "trend": "up"},
+                {"type": "kpi_card", "label": "Rooms occupied",  "value": "19",   "unit": "/ 28","trend": "up"},
                 {"type": "kpi_card", "label": "Comfort score",   "value": "78",   "unit": "%",   "trend": "up"},
             ],
         },
         {"type": "spacer", "height": 20},
-        {"type": "section_header", "title": "Temperature heatmap", "icon": "thermostat"},
-        {"type": "spacer", "height": 8},
-        {
-            "type": "heatmap_strip",
-            "title": "All 28 strips · current temperature",
-            "unit": "°",
-            "min": 19,
-            "max": 26,
-            "columns": 7,
-            "cells": HHS_HEATMAP_CELLS,
-        },
-        {"type": "spacer", "height": 20},
-        {"type": "section_header", "title": "Temperature trend", "icon": "thermometer"},
+        {"type": "section_header", "title": "Pick a room — temperature", "icon": "thermostat"},
         {"type": "spacer", "height": 8},
         {
             "type": "telemetry_chart",
             "metricType": "temperature",
-            "title": "Temperature (area)",
+            "title": "Temperature",
             "unit": "°C",
-            "groupBy": "room",
             "height": 260,
-            "chartKind": "area",
+            "chartKind": "line",
+            "mode": "pick",
+            "lockMode": True,
             "timeRanges": [
                 {"label": "Last 6 hours",  "hours": 6,   "granularity": "raw"},
                 {"label": "Last 24 hours", "hours": 24,  "granularity": "hourly"},
@@ -153,34 +103,30 @@ HHS_DASHBOARD = {
             ],
         },
         {"type": "spacer", "height": 20},
-        {"type": "section_header", "title": "CO₂ — latest by strip", "icon": "co2"},
+        {"type": "section_header", "title": "Pick a room — CO₂", "icon": "co2"},
         {"type": "spacer", "height": 8},
         {
             "type": "telemetry_chart",
             "metricType": "co2",
-            "title": "CO₂ (ranked)",
+            "title": "CO₂",
             "unit": "ppm",
-            "groupBy": "room",
-            "height": 320,
-            "chartKind": "bar",
+            "height": 260,
+            "chartKind": "area",
+            "mode": "pick",
+            "lockMode": True,
             "timeRanges": [
-                {"label": "Last hour",     "hours": 1,  "granularity": "raw"},
-                {"label": "Last 24 hours", "hours": 24, "granularity": "hourly"},
+                {"label": "Last hour",     "hours": 1,   "granularity": "raw"},
+                {"label": "Last 24 hours", "hours": 24,  "granularity": "hourly"},
+                {"label": "Last 7 days",   "hours": 168, "granularity": "hourly"},
             ],
         },
         {"type": "spacer", "height": 20},
         {
             "type": "bar_list",
-            "title": "Hottest strips right now",
+            "title": "Hottest rooms right now",
             "unit": "°C",
             "items": HHS_HOTTEST,
         },
-        {"type": "spacer", "height": 20},
-        {"type": "section_header", "title": "Operations", "icon": "info"},
-        {"type": "spacer", "height": 4},
-        {"type": "stat_row", "icon": "wifi",     "label": "Sensors reporting", "value": "84 / 84"},
-        {"type": "stat_row", "icon": "schedule", "label": "Last BMS poll",     "value": "2 min ago"},
-        {"type": "stat_row", "icon": "warning",  "label": "Open complaints",   "value": "3"},
         {"type": "spacer", "height": 16},
         {
             "type": "alert_banner",
@@ -193,7 +139,7 @@ HHS_DASHBOARD = {
 }
 
 
-# ── Building 28: meeting-room / occupant comfort dashboard ──────────
+# ── Building 28: floor & wing comparison, no schedule ───────────────
 B28_DASHBOARD = {
     "type": "column",
     "crossAxisAlignment": "stretch",
@@ -258,43 +204,74 @@ B28_DASHBOARD = {
         {"type": "progress_bar", "label": "Thermal comfort", "value": 82, "color": "teal"},
         {"type": "progress_bar", "label": "Air freshness",   "value": 64, "color": "amber"},
         {"type": "progress_bar", "label": "Acoustic quality","value": 90, "color": "teal"},
-        {"type": "spacer", "height": 20},
-        {"type": "section_header", "title": "Meeting rooms today", "icon": "people"},
+        {"type": "spacer", "height": 24},
+        {"type": "section_header", "title": "Compare floors — temperature", "icon": "apartment"},
         {"type": "spacer", "height": 8},
         {
-            "type": "bar_list",
-            "title": "Free hours remaining",
-            "unit": "h",
-            "items": B28_MEETING_ROOMS,
+            "type": "telemetry_chart",
+            "metricType": "temperature",
+            "title": "Temperature by floor",
+            "unit": "°C",
+            "height": 240,
+            "chartKind": "line",
+            "mode": "floor",
+            "lockMode": True,
+            "timeRanges": [
+                {"label": "Last 6 hours",  "hours": 6,   "granularity": "raw"},
+                {"label": "Last 24 hours", "hours": 24,  "granularity": "hourly"},
+                {"label": "Last 7 days",   "hours": 168, "granularity": "hourly"},
+            ],
         },
         {"type": "spacer", "height": 20},
-        {"type": "section_header", "title": "Your schedule", "icon": "schedule"},
-        {"type": "spacer", "height": 4},
+        {"type": "section_header", "title": "Compare floors — CO₂", "icon": "co2"},
+        {"type": "spacer", "height": 8},
         {
-            "type": "schedule_item",
-            "time": "09:00",
-            "title": "Standup — Project Kestrel",
-            "subtitle": "Until 09:30 · 4.E.040",
+            "type": "telemetry_chart",
+            "metricType": "co2",
+            "title": "CO₂ by floor",
+            "unit": "ppm",
+            "height": 240,
+            "chartKind": "area",
+            "mode": "floor",
+            "lockMode": True,
+            "timeRanges": [
+                {"label": "Last hour",     "hours": 1,   "granularity": "raw"},
+                {"label": "Last 24 hours", "hours": 24,  "granularity": "hourly"},
+            ],
         },
+        {"type": "spacer", "height": 24},
+        {"type": "section_header", "title": "Compare wings — temperature", "icon": "business"},
+        {"type": "spacer", "height": 8},
         {
-            "type": "schedule_item",
-            "time": "11:00",
-            "title": "1:1 with M. de Vries",
-            "subtitle": "Until 11:45 · 2.E.340",
+            "type": "telemetry_chart",
+            "metricType": "temperature",
+            "title": "Temperature: East vs West",
+            "unit": "°C",
+            "height": 240,
+            "chartKind": "line",
+            "mode": "wing",
+            "lockMode": True,
+            "timeRanges": [
+                {"label": "Last 6 hours",  "hours": 6,   "granularity": "raw"},
+                {"label": "Last 24 hours", "hours": 24,  "granularity": "hourly"},
+                {"label": "Last 7 days",   "hours": 168, "granularity": "hourly"},
+            ],
         },
+        {"type": "spacer", "height": 20},
+        {"type": "section_header", "title": "Compare wings — CO₂", "icon": "co2"},
+        {"type": "spacer", "height": 8},
         {
-            "type": "schedule_item",
-            "time": "14:00",
-            "title": "Design review",
-            "subtitle": "Until 15:30 · 1.W.560",
-        },
-        {"type": "spacer", "height": 16},
-        {
-            "type": "badge_row",
-            "badges": [
-                {"label": "Heating ON",  "color": "teal"},
-                {"label": "Vent ECO",    "color": "green"},
-                {"label": "Quiet hours", "color": "blue"},
+            "type": "telemetry_chart",
+            "metricType": "co2",
+            "title": "CO₂: East vs West (latest)",
+            "unit": "ppm",
+            "height": 220,
+            "chartKind": "bar",
+            "mode": "wing",
+            "lockMode": True,
+            "timeRanges": [
+                {"label": "Last hour",     "hours": 1,   "granularity": "raw"},
+                {"label": "Last 24 hours", "hours": 24,  "granularity": "hourly"},
             ],
         },
         {"type": "spacer", "height": 20},
