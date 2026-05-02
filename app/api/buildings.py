@@ -1117,24 +1117,77 @@ async def get_comfort_data(
     if total_votes == 0:
         return Response(status_code=204)
 
-    # Compute a simple overall score from vote payloads.
-    # In production this would be a more sophisticated aggregation.
     votes_result = await db.execute(
         select(Vote).where(Vote.building_id == building_id).limit(500)
     )
     votes = votes_result.scalars().all()
 
-    scores = []
-    for v in votes:
-        # Extract thermal_comfort if present in payload
-        if isinstance(v.payload, dict):
-            thermal = v.payload.get("thermal_comfort")
-            if thermal is not None and isinstance(thermal, (int, float)):
-                score = _thermal_comfort_to_score(thermal)
-                if score is not None:
-                    scores.append(score)
+    overall_scores: list[float] = []
+    location_buckets: dict[tuple[str, str], dict] = {}
 
-    overall = sum(scores) / len(scores) if scores else 5.0
+    for v in votes:
+        if not isinstance(v.payload, dict):
+            continue
+        thermal = v.payload.get("thermal_comfort")
+        score = (
+            _thermal_comfort_to_score(thermal)
+            if isinstance(thermal, (int, float))
+            else None
+        )
+        if score is not None:
+            overall_scores.append(score)
+
+        floor = str(v.payload.get("floor") or "_unknown")
+        room = str(v.payload.get("room") or v.payload.get("zone") or "_unknown")
+        floor_label = str(v.payload.get("floor_label") or v.payload.get("floorLabel") or floor)
+        room_label = str(v.payload.get("room_label") or v.payload.get("roomLabel") or room)
+        key = (floor, room)
+        bucket = location_buckets.setdefault(
+            key,
+            {
+                "floor": floor,
+                "floorLabel": floor_label,
+                "room": room,
+                "roomLabel": room_label,
+                "scores": [],
+                "voteCount": 0,
+                "thermal_sum": 0.0,
+                "thermal_n": 0,
+            },
+        )
+        bucket["voteCount"] += 1
+        if score is not None:
+            bucket["scores"].append(score)
+        if isinstance(thermal, (int, float)):
+            bucket["thermal_sum"] += float(thermal)
+            bucket["thermal_n"] += 1
+
+    overall = sum(overall_scores) / len(overall_scores) if overall_scores else 5.0
+
+    locations_payload: list[dict] = []
+    for bucket in location_buckets.values():
+        b_scores = bucket["scores"]
+        comfort = round(sum(b_scores) / len(b_scores), 1) if b_scores else 5.0
+        breakdown: dict[str, float] = {}
+        if bucket["thermal_n"]:
+            breakdown["thermal_sensation"] = round(
+                bucket["thermal_sum"] / bucket["thermal_n"], 2
+            )
+        locations_payload.append(
+            {
+                "floor": bucket["floor"],
+                "floorLabel": bucket["floorLabel"],
+                "room": bucket["room"],
+                "roomLabel": bucket["roomLabel"],
+                "comfortScore": comfort,
+                "voteCount": bucket["voteCount"],
+                "breakdown": breakdown,
+            }
+        )
+
+    locations_payload.sort(
+        key=lambda l: (l["floor"], l["room"])
+    )
 
     return {
         "buildingId": building_id,
@@ -1142,6 +1195,6 @@ async def get_comfort_data(
         "overallScore": round(overall, 1),
         "totalVotes": total_votes,
         "computedAt": datetime.now(timezone.utc).isoformat(),
-        "locations": [],
+        "locations": locations_payload,
         "sduiConfig": None,
     }
