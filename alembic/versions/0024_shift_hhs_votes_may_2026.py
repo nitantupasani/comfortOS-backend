@@ -12,13 +12,13 @@ MAX(created_at) lands at or after 2026-05-31 23:00 UTC. Week alignment
 preserves weekday (matching the convention of 0007/0018). No-op if the
 data already extends past the target.
 
-Revision ID: 0024_shift_hhs_votes_into_may_2026
+Revision ID: 0024_shift_hhs_votes_may_2026
 Revises: 0023_b28_minimal_vote_form
 """
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0024_shift_hhs_votes_into_may_2026"
+revision = "0024_shift_hhs_votes_may_2026"
 down_revision = "0023_b28_minimal_vote_form"
 branch_labels = None
 depends_on = None
