@@ -16,6 +16,9 @@ python-multipart>=0.0.12
 # HTTP client (Connector Gateway external calls)
 httpx>=0.27.0,<1.0.0
 
+# WebSocket client (Priva SignalR ingestion)
+websockets>=12.0,<16.0
+
 # Utilities
 python-dotenv>=1.0.0,<2.0.0
 

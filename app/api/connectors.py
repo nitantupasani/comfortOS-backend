@@ -41,6 +41,9 @@ _VALID_AUTH_TYPES = {
     "api_key",
     "basic_auth",
     "hmac",
+    # Priva Operator SignalR via replayed BFF session cookie. These rows are
+    # consumed by services/priva_ingestion.py, NOT the REST telemetry_poller.
+    "priva_signalr",
 }
 
 

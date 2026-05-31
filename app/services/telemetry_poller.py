@@ -421,6 +421,8 @@ async def _poll_due_connectors():
         result = await db.execute(
             select(BuildingConnector).where(
                 BuildingConnector.is_enabled == True,  # noqa: E712
+                # SignalR connectors are handled by priva_ingestion, not here.
+                BuildingConnector.auth_type != "priva_signalr",
             )
         )
         connectors = result.scalars().all()

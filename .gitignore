@@ -64,3 +64,7 @@ dist/
 
 # Graphify knowledge graph output
 graphify-out/
+
+# Priva building config (site/server/room map + comfortosBuildingId) ships with
+# the backend so the VM can run ingestion. Contains NO secrets — the session
+# cookie lives only in .env (which stays gitignored).

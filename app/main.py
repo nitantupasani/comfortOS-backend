@@ -88,9 +88,14 @@ async def lifespan(app: FastAPI):
     from .services.telemetry_poller import start_polling_loop
     poller_task = asyncio.create_task(start_polling_loop())
 
+    # Start Priva SignalR ingestion (no-op unless PRIVA_ENABLED=true)
+    from .services.priva_ingestion import start_priva_ingestion
+    priva_task = asyncio.create_task(start_priva_ingestion())
+
     yield
 
     poller_task.cancel()
+    priva_task.cancel()
     await engine.dispose()
 
 

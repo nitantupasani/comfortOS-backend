@@ -1,0 +1,1224 @@
+{
+  "_comment": "Priva building config for Fluwelen Burgwal 58 - Den Haag (tenant MERIN). Identity + temperature variable map. The session cookie is NOT here (secret, in .env). Regenerate/merge variables with: python -m scripts.priva_enumerate --building priva_buildings/fluwelen-burgwal-58.json --crawl",
+  "buildingName": "Fluwelen Burgwal 58 - Den Haag",
+  "comfortosBuildingId": "bldg-8f2fd3cf",
+  "siteId": "77512949-dae7-40ff-9b44-343596e58b96",
+  "groups": [
+    "p57560"
+  ],
+  "servers": {
+    "fd38d24d-d66e-4488-b800-3a0b159adadd": {
+      "controller": "AX202305100382",
+      "floors": [
+        "1e verdeiping",
+        "Begane grond",
+        "3e verdieping",
+        "2e verdieping"
+      ]
+    },
+    "a4c5e978-e7b1-469b-98c5-0d3bc7494f38": {
+      "controller": "AX202305100382",
+      "floors": [
+        "4e verdieping",
+        "5e verdieping",
+        "6e verdieping"
+      ]
+    }
+  },
+  "variables": {
+    "bd969d4e-44bb-4739-be27-f8e00cb1e558": {
+      "room": "NR101",
+      "floor": "1e verdeiping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-d7d12a25",
+      "server": "fd38d24d-d66e-4488-b800-3a0b159adadd",
+      "name": "Ruimtetemperatuur",
+      "target": "7059",
+      "section": "buildingsection4",
+      "centroid": {
+        "x": "486.4",
+        "y": "666.9"
+      }
+    },
+    "e8b4c1f4-060e-4eb8-9e15-34eee102414c": {
+      "room": "NR103",
+      "floor": "1e verdeiping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-edc1d73e",
+      "server": "fd38d24d-d66e-4488-b800-3a0b159adadd",
+      "name": "Ruimtetemperatuur",
+      "target": "7061",
+      "section": "buildingsection4",
+      "centroid": {
+        "x": "614.4",
+        "y": "769.3"
+      }
+    },
+    "214b53f1-c01e-461e-98dd-54b982bb28f3": {
+      "room": "NR104",
+      "floor": "1e verdeiping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-19d452b5",
+      "server": "fd38d24d-d66e-4488-b800-3a0b159adadd",
+      "name": "Ruimtetemperatuur",
+      "target": "7062",
+      "section": "buildingsection4",
+      "centroid": {
+        "x": "768.0",
+        "y": "820.5"
+      }
+    },
+    "549fd3dd-4e4b-4417-a98a-4e28765f8030": {
+      "room": "NR106",
+      "floor": "1e verdeiping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-a89a8477",
+      "server": "fd38d24d-d66e-4488-b800-3a0b159adadd",
+      "name": "Ruimtetemperatuur",
+      "target": "7064",
+      "section": "buildingsection4",
+      "centroid": {
+        "x": "1100.8",
+        "y": "922.9"
+      }
+    },
+    "76423f1f-e60c-4922-afe6-467422139af4": {
+      "room": "NR107",
+      "floor": "1e verdeiping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-bd73a7f6",
+      "server": "fd38d24d-d66e-4488-b800-3a0b159adadd",
+      "name": "Ruimtetemperatuur",
+      "target": "7065",
+      "section": "buildingsection4",
+      "centroid": {
+        "x": "1280.0",
+        "y": "1025.3"
+      }
+    },
+    "257513c7-3ed0-4153-992a-b94406f25b24": {
+      "room": "NR108",
+      "floor": "1e verdeiping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-3aa6f9ba",
+      "server": "fd38d24d-d66e-4488-b800-3a0b159adadd",
+      "name": "Ruimtetemperatuur",
+      "target": "7066",
+      "section": "buildingsection4",
+      "centroid": {
+        "x": "1331.2",
+        "y": "1153.3"
+      }
+    },
+    "1b0c937a-5089-4eb1-85a4-65e330124680": {
+      "room": "NR109",
+      "floor": "1e verdeiping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-7a480dd4",
+      "server": "fd38d24d-d66e-4488-b800-3a0b159adadd",
+      "name": "Ruimtetemperatuur",
+      "target": "7067",
+      "section": "buildingsection4",
+      "centroid": {
+        "x": "1536.0",
+        "y": "1127.7"
+      }
+    },
+    "fb177a80-dfb5-4666-b294-e800dde0c3d2": {
+      "room": "NR110",
+      "floor": "1e verdeiping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-e4727c44",
+      "server": "fd38d24d-d66e-4488-b800-3a0b159adadd",
+      "name": "Ruimtetemperatuur",
+      "target": "7068",
+      "section": "buildingsection4",
+      "centroid": {
+        "x": "1484.8",
+        "y": "1358.1"
+      }
+    },
+    "72c0bb2b-668c-4026-a4ef-ddff373cc464": {
+      "room": "NR102",
+      "floor": "1e verdeiping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-2b92f5d7",
+      "server": "fd38d24d-d66e-4488-b800-3a0b159adadd",
+      "name": "Ruimtetemperatuur",
+      "target": "7060",
+      "section": "buildingsection4",
+      "centroid": {
+        "x": "512.0",
+        "y": "948.5"
+      }
+    },
+    "13e87b2e-4066-406f-a705-ec0ba83e8029": {
+      "room": "NR111",
+      "floor": "1e verdeiping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-9e355ea2",
+      "server": "fd38d24d-d66e-4488-b800-3a0b159adadd",
+      "name": "Ruimtetemperatuur",
+      "target": "7069",
+      "section": "buildingsection4",
+      "centroid": {
+        "x": "1331.2",
+        "y": "1498.9"
+      }
+    },
+    "cd777ab5-bee5-4aeb-99bf-5e3099db6847": {
+      "room": "NR02",
+      "floor": "Begane grond",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-15f082d1",
+      "server": "fd38d24d-d66e-4488-b800-3a0b159adadd",
+      "name": "Ruimtetemperatuur",
+      "target": "5079",
+      "section": "buildingsection3",
+      "centroid": {
+        "x": "1331.2",
+        "y": "1102.1"
+      }
+    },
+    "25cc7af9-37a1-4a5a-895b-1e6ce4fd5058": {
+      "room": "NR03",
+      "floor": "Begane grond",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-88074a91",
+      "server": "fd38d24d-d66e-4488-b800-3a0b159adadd",
+      "name": "Ruimtetemperatuur",
+      "target": "5080",
+      "section": "buildingsection3",
+      "centroid": {
+        "x": "1510.4",
+        "y": "1102.1"
+      }
+    },
+    "95256af5-8164-432a-a77b-6482fd3e7b27": {
+      "room": "NR04",
+      "floor": "Begane grond",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-f00c302d",
+      "server": "fd38d24d-d66e-4488-b800-3a0b159adadd",
+      "name": "Ruimtetemperatuur",
+      "target": "5081",
+      "section": "buildingsection3",
+      "centroid": {
+        "x": "1510.4",
+        "y": "1358.1"
+      }
+    },
+    "bb32e984-e1b9-4334-b2f2-75bf0b429d72": {
+      "room": "NR05",
+      "floor": "Begane grond",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-7859443f",
+      "server": "fd38d24d-d66e-4488-b800-3a0b159adadd",
+      "name": "Ruimtetemperatuur",
+      "target": "5082",
+      "section": "buildingsection3",
+      "centroid": {
+        "x": "1510.4",
+        "y": "1486.1"
+      }
+    },
+    "1dd3f618-9d1f-450b-b392-c5224ba4e6ed": {
+      "room": "NR06",
+      "floor": "Begane grond",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-b01d122c",
+      "server": "fd38d24d-d66e-4488-b800-3a0b159adadd",
+      "name": "Ruimtetemperatuur",
+      "target": "5083",
+      "section": "buildingsection3",
+      "centroid": {
+        "x": "1331.2",
+        "y": "1486.1"
+      }
+    },
+    "55563579-317b-48c7-8040-0985cd0c913a": {
+      "room": "NR07",
+      "floor": "Begane grond",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-2753137c",
+      "server": "fd38d24d-d66e-4488-b800-3a0b159adadd",
+      "name": "Ruimtetemperatuur",
+      "target": "5084",
+      "section": "buildingsection3",
+      "centroid": {
+        "x": "1152.0",
+        "y": "1486.1"
+      }
+    },
+    "e3839a3d-fbad-471c-a68d-fc26ce5d680a": {
+      "room": "NR08",
+      "floor": "Begane grond",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-32cd241f",
+      "server": "fd38d24d-d66e-4488-b800-3a0b159adadd",
+      "name": "Ruimtetemperatuur",
+      "target": "1894",
+      "section": "buildingsection3",
+      "centroid": {
+        "x": "972.8",
+        "y": "1486.1"
+      }
+    },
+    "b8486d3e-f042-4796-8f81-54e51b257a78": {
+      "room": "NR09",
+      "floor": "Begane grond",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-022fa960",
+      "server": "fd38d24d-d66e-4488-b800-3a0b159adadd",
+      "name": "Ruimtetemperatuur",
+      "target": "23516",
+      "section": "buildingsection3",
+      "centroid": {
+        "x": "512.0",
+        "y": "1486.1"
+      }
+    },
+    "15538d87-0dfd-4d19-8a4d-2d027f1102ac": {
+      "room": "NR401",
+      "floor": "4e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-24e138c0",
+      "server": "a4c5e978-e7b1-469b-98c5-0d3bc7494f38",
+      "name": "Ruimtetemperatuur",
+      "target": "16874",
+      "section": "buildingsection14",
+      "centroid": {
+        "x": "486.4",
+        "y": "615.7"
+      }
+    },
+    "13ec976a-23b8-42e8-b76d-ef5373ad4678": {
+      "room": "NR402",
+      "floor": "4e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-14ba851a",
+      "server": "a4c5e978-e7b1-469b-98c5-0d3bc7494f38",
+      "name": "Ruimtetemperatuur",
+      "target": "16875",
+      "section": "buildingsection14",
+      "centroid": {
+        "x": "512.0",
+        "y": "974.1"
+      }
+    },
+    "3f9e07db-8b27-422b-8d8e-c4ca8779f24c": {
+      "room": "NR403",
+      "floor": "4e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-f5eb8b82",
+      "server": "a4c5e978-e7b1-469b-98c5-0d3bc7494f38",
+      "name": "Ruimtetemperatuur",
+      "target": "16876",
+      "section": "buildingsection14",
+      "centroid": {
+        "x": "486.4",
+        "y": "846.1"
+      }
+    },
+    "e6028145-d443-4d1d-945e-af73f489ab3c": {
+      "room": "NR406",
+      "floor": "4e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-64b53588",
+      "server": "a4c5e978-e7b1-469b-98c5-0d3bc7494f38",
+      "name": "Ruimtetemperatuur",
+      "target": "16879",
+      "section": "buildingsection14",
+      "centroid": {
+        "x": "1126.4",
+        "y": "1050.9"
+      }
+    },
+    "e73eb8e8-f124-4fe4-8220-3c3b57e608ea": {
+      "room": "NR407",
+      "floor": "4e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-35579c4f",
+      "server": "a4c5e978-e7b1-469b-98c5-0d3bc7494f38",
+      "name": "Ruimtetemperatuur",
+      "target": "16880",
+      "section": "buildingsection14",
+      "centroid": {
+        "x": "1305.6",
+        "y": "1153.3"
+      }
+    },
+    "2775ae53-79a5-40a2-967e-6a7b00777111": {
+      "room": "NR408",
+      "floor": "4e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-a189fbd5",
+      "server": "a4c5e978-e7b1-469b-98c5-0d3bc7494f38",
+      "name": "Ruimtetemperatuur",
+      "target": "16881",
+      "section": "buildingsection14",
+      "centroid": {
+        "x": "1587.2",
+        "y": "1153.3"
+      }
+    },
+    "f5ddd8a3-b66f-4684-ab69-e6f5fe692cd6": {
+      "room": "NR409",
+      "floor": "4e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-d8368131",
+      "server": "a4c5e978-e7b1-469b-98c5-0d3bc7494f38",
+      "name": "Ruimtetemperatuur",
+      "target": "16882",
+      "section": "buildingsection14",
+      "centroid": {
+        "x": "1587.2",
+        "y": "1281.3"
+      }
+    },
+    "53935cff-6767-4ad5-88eb-e511d6f5c1b0": {
+      "room": "NR411",
+      "floor": "4e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-e4c09277",
+      "server": "a4c5e978-e7b1-469b-98c5-0d3bc7494f38",
+      "name": "Ruimtetemperatuur",
+      "target": "16884",
+      "section": "buildingsection14",
+      "centroid": {
+        "x": "1331.2",
+        "y": "1434.9"
+      }
+    },
+    "0794fcdf-901d-4ae5-b862-a0641745a2c5": {
+      "room": "NR413",
+      "floor": "4e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-1faeb9ff",
+      "server": "a4c5e978-e7b1-469b-98c5-0d3bc7494f38",
+      "name": "Ruimtetemperatuur",
+      "target": "16886",
+      "section": "buildingsection14",
+      "centroid": {
+        "x": "921.6",
+        "y": "1434.9"
+      }
+    },
+    "640436c3-7c17-4375-9ea7-329a9955c287": {
+      "room": "NR414",
+      "floor": "4e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-91648b6a",
+      "server": "a4c5e978-e7b1-469b-98c5-0d3bc7494f38",
+      "name": "Ruimtetemperatuur",
+      "target": "16051",
+      "section": "buildingsection14",
+      "centroid": {
+        "x": "742.4",
+        "y": "1434.9"
+      }
+    },
+    "6aca30f1-da7e-4643-9f1b-3aeb49940cc7": {
+      "room": "NR412",
+      "floor": "4e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-9d59fc5c",
+      "server": "a4c5e978-e7b1-469b-98c5-0d3bc7494f38",
+      "name": "Ruimtetemperatuur",
+      "target": "15903",
+      "section": "buildingsection14",
+      "centroid": {
+        "x": "1126.4",
+        "y": "1434.9"
+      }
+    },
+    "c1551426-3afd-4083-bd5e-c9f297d8f8c4": {
+      "room": "NR301",
+      "floor": "3e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-4b5111b6",
+      "server": "fd38d24d-d66e-4488-b800-3a0b159adadd",
+      "name": "Ruimtetemperatuur",
+      "target": "13343",
+      "section": "buildingsection12",
+      "centroid": {
+        "x": "460.8",
+        "y": "590.1"
+      }
+    },
+    "7e650df0-7652-4a18-83f8-f2107b526d3b": {
+      "room": "NR302",
+      "floor": "3e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-8d61316f",
+      "server": "fd38d24d-d66e-4488-b800-3a0b159adadd",
+      "name": "Ruimtetemperatuur",
+      "target": "13344",
+      "section": "buildingsection12",
+      "centroid": {
+        "x": "512.0",
+        "y": "948.5"
+      }
+    },
+    "46f94d52-36bd-43f9-8b5e-e0b8900b0a78": {
+      "room": "NR303",
+      "floor": "3e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-f9d0109b",
+      "server": "fd38d24d-d66e-4488-b800-3a0b159adadd",
+      "name": "Ruimtetemperatuur",
+      "target": "13345",
+      "section": "buildingsection12",
+      "centroid": {
+        "x": "537.6",
+        "y": "820.5"
+      }
+    },
+    "2533bb10-dccc-4668-a740-f181dc52403d": {
+      "room": "NR304",
+      "floor": "3e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-972c78fc",
+      "server": "fd38d24d-d66e-4488-b800-3a0b159adadd",
+      "name": "Ruimtetemperatuur",
+      "target": "13346",
+      "section": "buildingsection12",
+      "centroid": {
+        "x": "768.0",
+        "y": "820.5"
+      }
+    },
+    "d03f6607-d32a-4418-86a2-50daf15714f5": {
+      "room": "NR305",
+      "floor": "3e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-a11d8f65",
+      "server": "fd38d24d-d66e-4488-b800-3a0b159adadd",
+      "name": "Ruimtetemperatuur",
+      "target": "13347",
+      "section": "buildingsection12",
+      "centroid": {
+        "x": "921.6",
+        "y": "897.3"
+      }
+    },
+    "5b026421-f95a-439c-8baf-99b4763543ee": {
+      "room": "NR306",
+      "floor": "3e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-cd6fe952",
+      "server": "fd38d24d-d66e-4488-b800-3a0b159adadd",
+      "name": "Ruimtetemperatuur",
+      "target": "13348",
+      "section": "buildingsection12",
+      "centroid": {
+        "x": "1075.2",
+        "y": "974.1"
+      }
+    },
+    "3bb4ab3f-ac13-4a43-a302-df8a91f7d8e1": {
+      "room": "NR307",
+      "floor": "3e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-7de22aa0",
+      "server": "fd38d24d-d66e-4488-b800-3a0b159adadd",
+      "name": "Ruimtetemperatuur",
+      "target": "13349",
+      "section": "buildingsection12",
+      "centroid": {
+        "x": "1254.4",
+        "y": "1050.9"
+      }
+    },
+    "bf2dec45-cdd4-4784-843d-81d9006d5583": {
+      "room": "NR308",
+      "floor": "3e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-815be11c",
+      "server": "fd38d24d-d66e-4488-b800-3a0b159adadd",
+      "name": "Ruimtetemperatuur",
+      "target": "13350",
+      "section": "buildingsection12",
+      "centroid": {
+        "x": "1408.0",
+        "y": "1178.9"
+      }
+    },
+    "69c5491a-a732-496f-b69c-5213630bd7df": {
+      "room": "NR309",
+      "floor": "3e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-10e6277d",
+      "server": "fd38d24d-d66e-4488-b800-3a0b159adadd",
+      "name": "Ruimtetemperatuur",
+      "target": "13351",
+      "section": "buildingsection12",
+      "centroid": {
+        "x": "1612.8",
+        "y": "1178.9"
+      }
+    },
+    "008d2dfc-8ead-4cc3-828a-86d014dd5314": {
+      "room": "NR310",
+      "floor": "3e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-3f8f8801",
+      "server": "fd38d24d-d66e-4488-b800-3a0b159adadd",
+      "name": "Ruimtetemperatuur",
+      "target": "13352",
+      "section": "buildingsection12",
+      "centroid": {
+        "x": "1587.2",
+        "y": "1332.5"
+      }
+    },
+    "0f0954bb-5f68-49be-8e2a-48d52f31fc1c": {
+      "room": "NR311",
+      "floor": "3e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-52aa0d0d",
+      "server": "fd38d24d-d66e-4488-b800-3a0b159adadd",
+      "name": "Ruimtetemperatuur",
+      "target": "13353",
+      "section": "buildingsection12",
+      "centroid": {
+        "x": "1408.0",
+        "y": "1486.1"
+      }
+    },
+    "dd300ba9-905f-4b1d-8881-24389205364f": {
+      "room": "NR315",
+      "floor": "3e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-73cb1c1f",
+      "server": "fd38d24d-d66e-4488-b800-3a0b159adadd",
+      "name": "Ruimtetemperatuur",
+      "target": "13354",
+      "section": "buildingsection12",
+      "centroid": {
+        "x": "512.0",
+        "y": "1486.1"
+      }
+    },
+    "c1c13595-7277-4899-8ca7-d88cf137fd62": {
+      "room": "NR314",
+      "floor": "3e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-82163fd7",
+      "server": "fd38d24d-d66e-4488-b800-3a0b159adadd",
+      "name": "Ruimtetemperatuur",
+      "target": "12900",
+      "section": "buildingsection12",
+      "centroid": {
+        "x": "716.8",
+        "y": "1486.1"
+      }
+    },
+    "843717a7-a676-4d5d-9bb2-d8a20c525059": {
+      "room": "NR313",
+      "floor": "3e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-65b42816",
+      "server": "fd38d24d-d66e-4488-b800-3a0b159adadd",
+      "name": "Ruimtetemperatuur",
+      "target": "13355",
+      "section": "buildingsection12",
+      "centroid": {
+        "x": "921.6",
+        "y": "1486.1"
+      }
+    },
+    "598f043d-a70f-492d-bb26-d96317ef2355": {
+      "room": "NR312",
+      "floor": "3e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-0e7c02e2",
+      "server": "fd38d24d-d66e-4488-b800-3a0b159adadd",
+      "name": "Ruimtetemperatuur",
+      "target": "13111",
+      "section": "buildingsection12",
+      "centroid": {
+        "x": "1177.6",
+        "y": "1486.1"
+      }
+    },
+    "8c1be2ec-7e8a-41d6-bfbc-38dae6353680": {
+      "room": "NR201",
+      "floor": "2e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-4ec25a81",
+      "server": "fd38d24d-d66e-4488-b800-3a0b159adadd",
+      "name": "Ruimtetemperatuur",
+      "target": "10195",
+      "section": "buildingsection10",
+      "centroid": {
+        "x": "448.0",
+        "y": "538.9"
+      }
+    },
+    "9dff3080-a828-4d3d-b3d0-abdd178dbc1f": {
+      "room": "NR203",
+      "floor": "2e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-2b678604",
+      "server": "fd38d24d-d66e-4488-b800-3a0b159adadd",
+      "name": "Ruimtetemperatuur",
+      "target": "10197",
+      "section": "buildingsection10",
+      "centroid": {
+        "x": "563.2",
+        "y": "794.9"
+      }
+    },
+    "4560570c-697a-4c5c-b258-4493cac0a8c2": {
+      "room": "NR204",
+      "floor": "2e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-af96e080",
+      "server": "fd38d24d-d66e-4488-b800-3a0b159adadd",
+      "name": "Ruimtetemperatuur",
+      "target": "10198",
+      "section": "buildingsection10",
+      "centroid": {
+        "x": "742.4",
+        "y": "820.5"
+      }
+    },
+    "2eedd145-1c0d-4502-9e24-c1272c5dc5cd": {
+      "room": "NR205",
+      "floor": "2e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-c779b105",
+      "server": "fd38d24d-d66e-4488-b800-3a0b159adadd",
+      "name": "Ruimtetemperatuur",
+      "target": "10199",
+      "section": "buildingsection10",
+      "centroid": {
+        "x": "870.4",
+        "y": "871.7"
+      }
+    },
+    "103023a8-2bfa-44df-9a4d-7c9fa462a34f": {
+      "room": "NR207",
+      "floor": "2e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-e8675f0e",
+      "server": "fd38d24d-d66e-4488-b800-3a0b159adadd",
+      "name": "Ruimtetemperatuur",
+      "target": "10201",
+      "section": "buildingsection10",
+      "centroid": {
+        "x": "1305.6",
+        "y": "1076.5"
+      }
+    },
+    "a0291106-615b-4c70-8615-4adbbeae1620": {
+      "room": "NR210",
+      "floor": "2e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-7d00fbad",
+      "server": "fd38d24d-d66e-4488-b800-3a0b159adadd",
+      "name": "Ruimtetemperatuur",
+      "target": "10204",
+      "section": "buildingsection10",
+      "centroid": {
+        "x": "1510.4",
+        "y": "1460.5"
+      }
+    },
+    "b9519905-d7bb-48bf-a8c5-2761f395f79c": {
+      "room": "NR211",
+      "floor": "2e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-8fa982f2",
+      "server": "fd38d24d-d66e-4488-b800-3a0b159adadd",
+      "name": "Ruimtetemperatuur",
+      "target": "10205",
+      "section": "buildingsection10",
+      "centroid": {
+        "x": "1331.2",
+        "y": "1460.5"
+      }
+    },
+    "61331cbc-0cf3-4068-8526-d63c887164bf": {
+      "room": "NR212",
+      "floor": "2e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-ecbb4c5e",
+      "server": "fd38d24d-d66e-4488-b800-3a0b159adadd",
+      "name": "Ruimtetemperatuur",
+      "target": "10206",
+      "section": "buildingsection10",
+      "centroid": {
+        "x": "1126.4",
+        "y": "1460.5"
+      }
+    },
+    "dc855c89-7eaa-4612-ac14-7bdda3e9c92e": {
+      "room": "NR215",
+      "floor": "2e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-8877f752",
+      "server": "fd38d24d-d66e-4488-b800-3a0b159adadd",
+      "name": "Ruimtetemperatuur",
+      "target": "9764",
+      "section": "buildingsection10",
+      "centroid": {
+        "x": "512.0",
+        "y": "1358.1"
+      }
+    },
+    "50f08386-8107-4c81-a06d-187c2061304e": {
+      "room": "NR214",
+      "floor": "2e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-3af58baa",
+      "server": "fd38d24d-d66e-4488-b800-3a0b159adadd",
+      "name": "Ruimtetemperatuur",
+      "target": "10208",
+      "section": "buildingsection10",
+      "centroid": {
+        "x": "716.8",
+        "y": "1460.5"
+      }
+    },
+    "dede7bef-201b-4d2b-bad2-6676fb019eff": {
+      "room": "NR206",
+      "floor": "2e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-1a2b960f",
+      "server": "fd38d24d-d66e-4488-b800-3a0b159adadd",
+      "name": "Ruimtetemperatuur",
+      "target": "9960",
+      "section": "buildingsection10",
+      "centroid": {
+        "x": "921.6",
+        "y": "1460.5"
+      }
+    },
+    "19f717d5-34f0-4d7f-82d1-008ec5866070": {
+      "room": "NR216",
+      "floor": "2e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-bf2770ca",
+      "server": "fd38d24d-d66e-4488-b800-3a0b159adadd",
+      "name": "Ruimtetemperatuur",
+      "target": "27696",
+      "section": "buildingsection10",
+      "centroid": {
+        "x": "512.0",
+        "y": "1537.3"
+      }
+    },
+    "b7c5b493-a05d-4c1b-b739-77670b476e69": {
+      "room": "NR502",
+      "floor": "5e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-9ce21ee5",
+      "server": "a4c5e978-e7b1-469b-98c5-0d3bc7494f38",
+      "name": "Comset CX",
+      "target": "23795",
+      "section": "buildingsection17",
+      "centroid": {
+        "x": "550.4",
+        "y": "974.1"
+      }
+    },
+    "f306d99c-7cad-4c58-80bf-4b7a6a004f1d": {
+      "room": "NR503",
+      "floor": "5e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-732ffdaf",
+      "server": "a4c5e978-e7b1-469b-98c5-0d3bc7494f38",
+      "name": "Comset CX",
+      "target": "23991",
+      "section": "buildingsection17",
+      "centroid": {
+        "x": "665.6",
+        "y": "718.1"
+      }
+    },
+    "e8dbf7af-91f2-4b1c-b8f1-9f89d144e0c7": {
+      "room": "NR504",
+      "floor": "5e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-b8d5f679",
+      "server": "a4c5e978-e7b1-469b-98c5-0d3bc7494f38",
+      "name": "Comset CX",
+      "target": "24187",
+      "section": "buildingsection17",
+      "centroid": {
+        "x": "806.4",
+        "y": "782.1"
+      }
+    },
+    "76e35505-d438-4203-b276-e570169ca8bd": {
+      "room": "NR505",
+      "floor": "5e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-b6cb5f44",
+      "server": "a4c5e978-e7b1-469b-98c5-0d3bc7494f38",
+      "name": "Comset CX",
+      "target": "24383",
+      "section": "buildingsection17",
+      "centroid": {
+        "x": "934.4",
+        "y": "846.1"
+      }
+    },
+    "84d448af-1e86-4d04-a2c1-1bbc868c145e": {
+      "room": "NR508",
+      "floor": "5e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-01126b4b",
+      "server": "a4c5e978-e7b1-469b-98c5-0d3bc7494f38",
+      "name": "Comset CX",
+      "target": "24971",
+      "section": "buildingsection17",
+      "centroid": {
+        "x": "1600.0",
+        "y": "1140.5"
+      }
+    },
+    "4634ddb9-4a01-4b00-ad8c-bd5c8f3c9ab5": {
+      "room": "NR509",
+      "floor": "5e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-2b2f40ec",
+      "server": "a4c5e978-e7b1-469b-98c5-0d3bc7494f38",
+      "name": "Comset CX",
+      "target": "25167",
+      "section": "buildingsection17",
+      "centroid": {
+        "x": "1600.0",
+        "y": "1358.1"
+      }
+    },
+    "bf2c5199-dea1-4d4b-b04e-bb9672420fd6": {
+      "room": "NR501",
+      "floor": "5e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-e5ee8936",
+      "server": "a4c5e978-e7b1-469b-98c5-0d3bc7494f38",
+      "name": "Comset CX",
+      "target": "20011",
+      "section": "buildingsection17",
+      "centroid": {
+        "x": "473.6",
+        "y": "654.1"
+      }
+    },
+    "17986f68-5898-49ff-82df-4581fbd2148b": {
+      "room": "NR510",
+      "floor": "5e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-5bf5dbfb",
+      "server": "a4c5e978-e7b1-469b-98c5-0d3bc7494f38",
+      "name": "Comset CX",
+      "target": "25363",
+      "section": "buildingsection17",
+      "centroid": {
+        "x": "1484.8",
+        "y": "1524.5"
+      }
+    },
+    "8d1090a1-4867-438a-9bcd-663ff4cc34c8": {
+      "room": "NR511",
+      "floor": "5e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-c5c809ef",
+      "server": "a4c5e978-e7b1-469b-98c5-0d3bc7494f38",
+      "name": "Comset CX",
+      "target": "25559",
+      "section": "buildingsection17",
+      "centroid": {
+        "x": "1305.6",
+        "y": "1524.5"
+      }
+    },
+    "bb1a7161-4032-40f7-839b-86ddc96f0c19": {
+      "room": "NR512",
+      "floor": "5e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-b60067ce",
+      "server": "a4c5e978-e7b1-469b-98c5-0d3bc7494f38",
+      "name": "Comset CX",
+      "target": "25755",
+      "section": "buildingsection17",
+      "centroid": {
+        "x": "1152.0",
+        "y": "1524.5"
+      }
+    },
+    "c4f2c896-2a16-43c4-98fe-89cea222a812": {
+      "room": "NR513",
+      "floor": "5e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-c081e685",
+      "server": "a4c5e978-e7b1-469b-98c5-0d3bc7494f38",
+      "name": "Comset CX",
+      "target": "25951",
+      "section": "buildingsection17",
+      "centroid": {
+        "x": "870.4",
+        "y": "1524.5"
+      }
+    },
+    "9f421488-129a-402f-95e4-34aeb0b1e35c": {
+      "room": "NR514",
+      "floor": "5e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-c69a6cd6",
+      "server": "a4c5e978-e7b1-469b-98c5-0d3bc7494f38",
+      "name": "Comset CX",
+      "target": "26147",
+      "section": "buildingsection17",
+      "centroid": {
+        "x": "729.6",
+        "y": "1524.5"
+      }
+    },
+    "d339da39-420d-4842-a49f-713c065b9cc1": {
+      "room": "NR515",
+      "floor": "5e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-3f586212",
+      "server": "a4c5e978-e7b1-469b-98c5-0d3bc7494f38",
+      "name": "Comset CX",
+      "target": "26343",
+      "section": "buildingsection17",
+      "centroid": {
+        "x": "563.2",
+        "y": "1358.1"
+      }
+    },
+    "5c4e219d-f067-495f-b956-f6529ee6c4d2": {
+      "room": "NR506",
+      "floor": "5e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-e31d1b0e",
+      "server": "a4c5e978-e7b1-469b-98c5-0d3bc7494f38",
+      "name": "Comset CX",
+      "target": "24775",
+      "section": "buildingsection17",
+      "centroid": {
+        "x": "1203.2",
+        "y": "1012.5"
+      }
+    },
+    "7a871317-4002-49bb-8153-43f09edcbd10": {
+      "room": "NR507",
+      "floor": "5e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-26c0f8ef",
+      "server": "a4c5e978-e7b1-469b-98c5-0d3bc7494f38",
+      "name": "Comset CX",
+      "target": "26539",
+      "section": "buildingsection17",
+      "centroid": {
+        "x": "1011.2",
+        "y": "1524.5"
+      }
+    },
+    "e4ca543f-8c37-4cf0-9aad-e068a42d3ae9": {
+      "room": "NR601",
+      "floor": "6e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-d2638700",
+      "server": "a4c5e978-e7b1-469b-98c5-0d3bc7494f38",
+      "name": "Ruimtetemperatuur",
+      "target": "22340",
+      "section": "buildingsection16",
+      "centroid": {
+        "x": "1254.4",
+        "y": "1076.5"
+      }
+    },
+    "83c2c390-5391-4608-b97c-0576888b5117": {
+      "room": "NR602",
+      "floor": "6e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-21f4ef5f",
+      "server": "a4c5e978-e7b1-469b-98c5-0d3bc7494f38",
+      "name": "Ruimtetemperatuur",
+      "target": "22341",
+      "section": "buildingsection16",
+      "centroid": {
+        "x": "1510.4",
+        "y": "1102.1"
+      }
+    },
+    "be33f1cf-3c15-4806-947d-a3bee8fc96b7": {
+      "room": "NR603",
+      "floor": "6e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-aa1d901d",
+      "server": "a4c5e978-e7b1-469b-98c5-0d3bc7494f38",
+      "name": "Ruimtetemperatuur",
+      "target": "22342",
+      "section": "buildingsection16",
+      "centroid": {
+        "x": "1510.4",
+        "y": "1230.1"
+      }
+    },
+    "ed686944-3dcd-4579-ba38-edce51176871": {
+      "room": "NR604",
+      "floor": "6e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-d790815c",
+      "server": "a4c5e978-e7b1-469b-98c5-0d3bc7494f38",
+      "name": "Ruimtetemperatuur",
+      "target": "22343",
+      "section": "buildingsection16",
+      "centroid": {
+        "x": "1254.4",
+        "y": "1460.5"
+      }
+    },
+    "2bccf6c4-8ebc-4878-b69c-6f4b733ebe9b": {
+      "room": "NR607",
+      "floor": "6e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-0522e412",
+      "server": "a4c5e978-e7b1-469b-98c5-0d3bc7494f38",
+      "name": "Ruimtetemperatuur",
+      "target": "22344",
+      "section": "buildingsection16",
+      "centroid": {
+        "x": "716.8",
+        "y": "1434.9"
+      }
+    },
+    "f630cf3f-1338-410e-8fcc-029fa7a8aa25": {
+      "room": "NR606",
+      "floor": "6e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-d2646dce",
+      "server": "a4c5e978-e7b1-469b-98c5-0d3bc7494f38",
+      "name": "Ruimtetemperatuur",
+      "target": "19582",
+      "section": "buildingsection16",
+      "centroid": {
+        "x": "1203.2",
+        "y": "1332.5"
+      }
+    },
+    "109310f6-8499-4f84-a2cf-0f82bbcb83fd": {
+      "room": "NR608",
+      "floor": "6e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-d976b10c",
+      "server": "a4c5e978-e7b1-469b-98c5-0d3bc7494f38",
+      "name": "Ruimtetemperatuur",
+      "target": "23320",
+      "section": "buildingsection16",
+      "centroid": {
+        "x": "563.2",
+        "y": "1434.9"
+      }
+    },
+    "68ace995-6cfb-4f16-acd0-696d8cdaea27": {
+      "room": "NR605",
+      "floor": "6e verdieping",
+      "metric": "temperature",
+      "unit": "C",
+      "location_id": "loc-ac6d8f08",
+      "server": "a4c5e978-e7b1-469b-98c5-0d3bc7494f38",
+      "name": "Ruimtetemperatuur",
+      "target": "16482",
+      "section": "buildingsection16",
+      "centroid": {
+        "x": "1408.0",
+        "y": "1460.5"
+      }
+    }
+  },
+  "floorLocations": {
+    "0": "loc-90958cf8",
+    "1": "loc-653a9b69",
+    "2": "loc-00924ffa",
+    "3": "loc-2de7c2f2",
+    "4": "loc-250e9607",
+    "5": "loc-3c8d349a",
+    "6": "loc-62ceddd4"
+  }
+}

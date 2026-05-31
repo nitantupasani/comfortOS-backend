@@ -44,6 +44,14 @@ class Settings(BaseSettings):
     # ── Connector Gateway ────────────────────────────────────────────────
     connector_gateway_timeout_seconds: int = 15
 
+    # ── Priva SignalR ingestion (unofficial GUI API; see priva_ingestion.py) ─
+    # Per-building identity + variable map live in a building file (gitignored);
+    # only the session cookie (secret, rotates) and runtime flags are env vars.
+    priva_enabled: bool = False
+    priva_bff_cookie: str = ""          # full Cookie header, or just "__Host-bff=..."
+    priva_building_file: str = "priva_buildings/fluwelen-burgwal-58.json"
+    priva_flush_minutes: int = 15
+
     # ── Gemini (AI assistant widget) ─────────────────────────────────────
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.0-flash"
