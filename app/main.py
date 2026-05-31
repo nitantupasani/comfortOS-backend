@@ -14,12 +14,24 @@ Implements the C4 architecture from backend.puml:
 """
 
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
+
+# Surface our own loggers (e.g. comfortos.priva) in stdout/journald. Under
+# uvicorn the root logger defaults to WARNING, so app INFO lines are otherwise
+# dropped — this makes the Priva ingestion subscribe/flush lines visible.
+_comfortos_logger = logging.getLogger("comfortos")
+_comfortos_logger.setLevel(logging.INFO)
+if not _comfortos_logger.handlers:
+    _h = logging.StreamHandler()
+    _h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    _comfortos_logger.addHandler(_h)
+    _comfortos_logger.propagate = False
 from .database import engine, Base
 from .middleware.rate_limiter import RateLimitMiddleware
 
