@@ -1,23 +1,23 @@
-"""Seed comfort votes that track the building's real temperature data.
+"""Seed comfort votes that loosely track the building's real temperature data.
 
-For every room we have temperature telemetry for, this samples readings over
-their full time span and emits comfort votes whose thermal sensation matches
-the measured temperature: a 24 °C room votes "slightly warm", a 21 °C room
-votes "neutral", an 18 °C room votes "cool" — never the opposite. Each vote is
-timestamped at the reading it was derived from, so the comfort history lines up
-with the temperature history.
+Goal: a believable, sparse comfort history — about ~30 votes per day spread at
+random times across random rooms, with thermal sensation correlated to the
+measured temperature but with real spread: mostly neutral / slightly warm /
+slightly cool, rarely extreme. Each vote is timestamped at the reading it was
+derived from.
 
 Thermal scale: centred ASHRAE -3 (cold) .. 0 (neutral) .. +3 (hot), matching
-``GET /buildings/{id}/comfort`` (``payload.thermal_comfort``) and the web
-VoteFormRenderer.
+``GET /buildings/{id}/comfort`` (``payload.thermal_comfort``).
 
-DB mode (default) writes straight into the ``votes`` table:
+DB mode writes straight into the ``votes`` table:
 
     export DATABASE_URL="postgresql+asyncpg://user:pass@host:5432/db"
-    python -m scripts.seed_temp_correlated_votes --building bldg-8f2fd3cf
+    # clear any previous seed, then add ~30/day with spread:
+    python -m scripts.seed_temp_correlated_votes --purge --per-day 30 --seed 42
 
-Votes are idempotent: the vote_uuid is a uuid5 of (building, room, timestamp),
-so re-running tops up missing rows without creating duplicates.
+Votes are tagged ``payload.source = "seed_temp_correlated"`` so a re-run with
+``--purge`` removes exactly the rows this script created. The vote_uuid is a
+uuid5 of (building, room, timestamp), so seeding is idempotent.
 """
 
 import argparse
@@ -26,35 +26,33 @@ import os
 import random
 import sys
 import uuid
-from datetime import datetime, timezone
+from collections import defaultdict
+from datetime import timezone
 
-# Stable namespace so re-runs produce the same vote_uuid per (room, timestamp).
 _NS = uuid.UUID("11111111-2222-3333-4444-555555555555")
-
-# ASHRAE neutral temperature and degrees per scale step. 22 °C → 0 (neutral),
-# ~1.6 °C moves the sensation by one point.
-NEUTRAL_C = 22.0
-DEG_PER_STEP = 1.6
+SOURCE_TAG = "seed_temp_correlated"
 
 
-def temp_to_sensation(temp_c: float, jitter: float) -> int:
-    """Map a temperature to a centred -3..+3 thermal sensation vote.
+def temp_to_sensation(
+    temp_c: float, neutral: float, deg_per_step: float, jitter: float, max_abs: int
+) -> int:
+    """Map a temperature to a centred thermal sensation, clamped to ±max_abs.
 
-    `jitter` (std-dev in scale points) adds mild per-occupant variation so the
-    cluster is not perfectly deterministic, while staying correlated with temp.
+    `neutral` is the temperature treated as 0; `deg_per_step` is how many °C
+    moves the sensation by one point (larger = gentler). `jitter` adds gaussian
+    spread (in scale points) so a warm room still produces some neutral and
+    occasionally slightly-cool votes — believable inter-occupant variation.
     """
-    raw = (temp_c - NEUTRAL_C) / DEG_PER_STEP
-    if jitter:
-        raw += random.gauss(0.0, jitter)
-    return max(-3, min(3, int(round(raw))))
+    raw = (temp_c - neutral) / deg_per_step + random.gauss(0.0, jitter)
+    return max(-max_abs, min(max_abs, int(round(raw))))
 
 
-def _vote_uuid(building_id: str, room: str, ts: datetime) -> str:
-    return str(uuid.uuid5(_NS, f"{building_id}|{room}|{ts.isoformat()}"))
+def _vote_uuid(building_id: str, room: str, ts_iso: str) -> str:
+    return str(uuid.uuid5(_NS, f"{building_id}|{room}|{ts_iso}"))
 
 
 async def _run_db(args: argparse.Namespace) -> None:
-    from sqlalchemy import select
+    from sqlalchemy import select, text
     from sqlalchemy.dialects.postgresql import insert as pg_insert
     from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
     from sqlalchemy.orm import sessionmaker
@@ -70,11 +68,25 @@ async def _run_db(args: argparse.Namespace) -> None:
     engine = create_async_engine(db_url)
     Session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
-    interval = args.interval_minutes * 60.0
-
     async with Session() as session:
-        # Pull every plausible temperature reading for the building, ordered so
-        # we can walk each room's series in time.
+        # Optionally clear previous seed rows for this building.
+        if args.purge:
+            if args.dry_run:
+                cnt = (await session.execute(
+                    text("SELECT count(*) FROM votes WHERE building_id = :b "
+                         "AND payload->>'source' = :s"),
+                    {"b": args.building, "s": SOURCE_TAG},
+                )).scalar()
+                print(f"[dry-run] would purge {cnt} existing seeded votes")
+            else:
+                res = await session.execute(
+                    text("DELETE FROM votes WHERE building_id = :b "
+                         "AND payload->>'source' = :s"),
+                    {"b": args.building, "s": SOURCE_TAG},
+                )
+                await session.commit()
+                print(f"purged {res.rowcount or 0} existing seeded votes")
+
         stmt = (
             select(
                 TelemetryReading.location_id,
@@ -88,7 +100,7 @@ async def _run_db(args: argparse.Namespace) -> None:
                 TelemetryReading.metric_type == "temperature",
                 TelemetryReading.value != 0,
             )
-            .order_by(TelemetryReading.zone, TelemetryReading.recorded_at)
+            .order_by(TelemetryReading.recorded_at)
         )
         rows = (await session.execute(stmt)).all()
 
@@ -97,82 +109,78 @@ async def _run_db(args: argparse.Namespace) -> None:
             await engine.dispose()
             return
 
-        # Build vote candidates: one per room per sampling interval.
-        candidates: list[dict] = []
-        per_room_count: dict[str, int] = {}
-        last_emit: dict[str, datetime] = {}
-
+        # Bucket readings by calendar day so we can target ~per_day votes/day.
+        by_day: dict[object, list] = defaultdict(list)
         for location_id, floor, zone, value, recorded_at in rows:
-            room = zone or location_id or "_unknown"
             if recorded_at.tzinfo is None:
                 recorded_at = recorded_at.replace(tzinfo=timezone.utc)
-
-            prev = last_emit.get(room)
-            if prev is not None and (recorded_at - prev).total_seconds() < interval:
-                continue
-            if per_room_count.get(room, 0) >= args.max_per_room:
-                continue
-            if random.random() > args.rate:
-                last_emit[room] = recorded_at
-                continue
-
-            last_emit[room] = recorded_at
-            per_room_count[room] = per_room_count.get(room, 0) + 1
-
-            thermal = temp_to_sensation(float(value), args.jitter)
-            floor_s = str(floor or "_unknown")
-            payload = {
-                "floor": floor_s,
-                "floor_label": floor_s,
-                "room": room,
-                "room_label": room,
-                "zone": room,
-                "thermal_comfort": thermal,
-                "source": "seed_temp_correlated",
-            }
-            candidates.append(
-                {
-                    "vote_uuid": _vote_uuid(args.building, room, recorded_at),
-                    "building_id": args.building,
-                    "user_id": args.user,
-                    "payload": payload,
-                    "schema_version": 2,
-                    "status": VoteStatus.confirmed,
-                    "created_at": recorded_at,
-                }
+            room = zone or location_id or "_unknown"
+            by_day[recorded_at.date()].append(
+                (room, str(floor or "_unknown"), float(value), recorded_at)
             )
 
-        if args.max and len(candidates) > args.max:
-            random.shuffle(candidates)
-            candidates = candidates[: args.max]
+        # For each day, sample a randomised number of readings (random rooms,
+        # random times) and turn each into a vote.
+        candidates: list[dict] = []
+        seen_keys: set[str] = set()
+        for day in sorted(by_day):
+            pool = by_day[day]
+            target = args.per_day * random.uniform(1 - args.freq_jitter, 1 + args.freq_jitter)
+            n = min(len(pool), max(0, int(round(target))))
+            for room, floor_s, value, ts in random.sample(pool, n):
+                key = _vote_uuid(args.building, room, ts.isoformat())
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
+                thermal = temp_to_sensation(
+                    value, args.neutral, args.deg_per_step, args.jitter, args.max_abs
+                )
+                candidates.append(
+                    {
+                        "vote_uuid": key,
+                        "building_id": args.building,
+                        "user_id": args.user,
+                        "payload": {
+                            "floor": floor_s,
+                            "floor_label": floor_s,
+                            "room": room,
+                            "room_label": room,
+                            "zone": room,
+                            "thermal_comfort": thermal,
+                            "source": SOURCE_TAG,
+                        },
+                        "schema_version": 2,
+                        "status": VoteStatus.confirmed,
+                        "created_at": ts,
+                    }
+                )
+
+        _print_summary(candidates, len(by_day))
 
         if args.dry_run:
-            _print_summary(candidates)
-            print(f"[dry-run] would insert {len(candidates)} votes "
-                  f"across {len(per_room_count)} rooms")
+            print(f"[dry-run] would insert {len(candidates)} votes")
             await engine.dispose()
             return
 
-        # Idempotent bulk insert — skip rows whose vote_uuid already exists.
         inserted = 0
         CHUNK = 500
         for i in range(0, len(candidates), CHUNK):
             chunk = candidates[i : i + CHUNK]
-            stmt = pg_insert(Vote).values(chunk).on_conflict_do_nothing(
+            ins = pg_insert(Vote).values(chunk).on_conflict_do_nothing(
                 index_elements=["vote_uuid"]
             )
-            result = await session.execute(stmt)
-            inserted += result.rowcount or 0
+            res = await session.execute(ins)
+            inserted += res.rowcount or 0
         await session.commit()
 
     await engine.dispose()
-    _print_summary(candidates)
     print(f"done: inserted {inserted} new votes "
           f"({len(candidates)} candidates) into {args.building}")
 
 
-def _print_summary(candidates: list[dict]) -> None:
+def _print_summary(candidates: list[dict], n_days: int) -> None:
     if not candidates:
+        print("no candidates generated")
         return
     dist: dict[int, int] = {}
     for c in candidates:
@@ -180,28 +188,33 @@ def _print_summary(candidates: list[dict]) -> None:
         dist[t] = dist.get(t, 0) + 1
     span_lo = min(c["created_at"] for c in candidates)
     span_hi = max(c["created_at"] for c in candidates)
+    avg = len(candidates) / n_days if n_days else 0
     print(f"thermal_comfort distribution: "
           f"{{ {', '.join(f'{k:+d}: {dist[k]}' for k in sorted(dist))} }}")
+    print(f"{len(candidates)} votes over {n_days} days (~{avg:.0f}/day)")
     print(f"time span: {span_lo.isoformat()} -> {span_hi.isoformat()}")
 
 
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--building", default="bldg-8f2fd3cf", help="Building id")
-    p.add_argument("--interval-minutes", type=int, default=120,
-                   help="Min spacing between votes per room (default 120)")
-    p.add_argument("--rate", type=float, default=0.6,
-                   help="Probability a sampled reading becomes a vote (0..1)")
-    p.add_argument("--jitter", type=float, default=0.4,
-                   help="Std-dev of thermal-sensation noise in scale points")
-    p.add_argument("--max-per-room", type=int, default=60,
-                   help="Cap votes per room")
-    p.add_argument("--max", type=int, default=8000,
-                   help="Global cap on total votes (0 = unlimited)")
-    p.add_argument("--user", default=None, help="user_id to stamp (default anonymous/null)")
-    p.add_argument("--seed", type=int, default=None, help="RNG seed for reproducibility")
+    p.add_argument("--per-day", type=int, default=30, help="Target votes per day")
+    p.add_argument("--freq-jitter", type=float, default=0.35,
+                   help="Random +/- fraction on the per-day count (0..1)")
+    p.add_argument("--neutral", type=float, default=23.5,
+                   help="Temperature (°C) treated as neutral (0 on the scale)")
+    p.add_argument("--deg-per-step", type=float, default=2.4,
+                   help="°C per one thermal-sensation step (larger = gentler)")
+    p.add_argument("--jitter", type=float, default=0.85,
+                   help="Std-dev of per-vote sensation noise in scale points")
+    p.add_argument("--max-abs", type=int, default=2,
+                   help="Clamp sensation to +/- this (2 = never 'extreme')")
+    p.add_argument("--user", default=None, help="user_id to stamp (default null)")
+    p.add_argument("--purge", action="store_true",
+                   help="Delete this script's previously seeded votes first")
+    p.add_argument("--seed", type=int, default=None, help="RNG seed")
     p.add_argument("--dry-run", action="store_true",
-                   help="Print what would be inserted without writing")
+                   help="Print what would happen without writing")
     args = p.parse_args()
 
     if args.seed is not None:
