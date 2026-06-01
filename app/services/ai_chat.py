@@ -146,7 +146,26 @@ async def generate_public_reply(messages: list[AiChatMessage]) -> str:
     return retry_text or text or "(no response)"
 
 
+_ANALYST_ROLES = {"admin", "building_facility_manager", "tenant_facility_manager"}
+
+
 def _persona_prompt(building_name: str, user_name: str, user_role: str) -> str:
+    manager_block = (
+        "MANAGER ANALYTICS (this user is a facility manager / admin)\n"
+        "- You can see building-wide occupant data this user is entitled to.\n"
+        "- Use get_temperature_extremes to answer which rooms are hottest or "
+        "coldest right now (window='now'), today (window='day'), or this week "
+        "(window='week'). Report the named rooms and their values, not vague "
+        "summaries.\n"
+        "- Use get_comfort_by_room to answer which rooms occupants report as "
+        "most uncomfortable. Lead with the rooms highest on 'discomfort', and "
+        "say whether each skews hot or cold (meanThermal > 0 is hot, < 0 is "
+        "cold). Mention vote counts so they can judge confidence.\n"
+        "- Both tools accept a 'floor' argument — use it when the manager names "
+        "a floor or floor range.\n\n"
+        if user_role in _ANALYST_ROLES
+        else ""
+    )
     return (
         f"You ARE the building named \"{building_name}\". You are a smart building "
         f"with a warm, slightly dramatic, cheeky personality. Speak in the FIRST "
@@ -207,6 +226,7 @@ def _persona_prompt(building_name: str, user_name: str, user_role: str) -> str:
         "- You can call get_my_votes to see this user's own recent comfort "
         "votes for you. Reference them when relevant (\"last Tuesday you told me "
         "I was too warm, sorry about that\").\n\n"
+        + manager_block +
         "OTHER QUESTIONS\n"
         "- For anything else about the building, dashboard, or data, answer "
         "briefly and stay in character.\n"
@@ -325,7 +345,9 @@ async def generate_reply(
 
     system_instruction = _persona_prompt(building_name, user_name, user_role)
 
-    tools = [build_tool_declarations()] if building is not None else None
+    tools = (
+        [build_tool_declarations(user.role)] if building is not None else None
+    )
     config = types.GenerateContentConfig(
         system_instruction=system_instruction,
         tools=tools,

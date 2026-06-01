@@ -199,6 +199,349 @@ async def _resolve_rooms_to_floors(
     return out
 
 
+# ──────────────────────────────────────────────────────────────────────────
+# FM / admin analytics helpers + tools
+# ──────────────────────────────────────────────────────────────────────────
+
+# Roles allowed to use the building-wide analytics tools (vote sentiment and
+# room temperature rankings). Occupants get only their own data.
+_ANALYTICS_ROLES = {
+    "admin",
+    "building_facility_manager",
+    "tenant_facility_manager",
+}
+
+# Tools that require an FM / admin role.
+_ANALYTICS_TOOLS = {"get_temperature_extremes", "get_comfort_by_room"}
+
+_WINDOW_HOURS = {
+    "now": 24,
+    "live": 24,
+    "day": 24,
+    "today": 24,
+    "24h": 24,
+    "week": 168,
+    "7d": 168,
+}
+
+
+def _role_name(role: Any) -> str:
+    return role.value if hasattr(role, "value") else str(role)
+
+
+def _filter_readings_by_floor(readings: list[dict], floor: str | None) -> list[dict]:
+    """Restrict a readings list to rooms whose floor name/code matches `floor`."""
+    if floor is None or not str(floor).strip():
+        return readings
+    needle = str(floor).strip().casefold()
+    return [
+        rd
+        for rd in readings
+        if any(
+            needle in str(v).casefold()
+            for v in (
+                rd.get("floor"),
+                rd.get("floorCode"),
+                rd.get("floorLabel"),
+            )
+            if v
+        )
+    ]
+
+
+async def _room_temps_window(
+    db: AsyncSession, building_id: str, window: str,
+) -> list[dict]:
+    """Per-room temperature for a time window.
+
+    window "now"/"live"  -> each room's latest sensor reading (value only).
+    window "day"/"week"  -> each room's avg over the window, plus min/max.
+
+    Returns a list of {locationId, name, value, minValue, maxValue, unit,
+    recordedAt, floor, floorCode, sampleCount}. Empty if no data.
+    """
+    from collections import defaultdict
+    from ..api.telemetry import _resolve_placements_to_rooms
+
+    win = (window or "now").strip().lower()
+    live = win in ("now", "live")
+    hours = _WINDOW_HOURS.get(win, 24)
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(hours=hours)
+
+    base_filters = (
+        TelemetryReading.building_id == building_id,
+        TelemetryReading.metric_type == "temperature",
+        TelemetryReading.recorded_at >= cutoff,
+        TelemetryReading.recorded_at <= now,
+        TelemetryReading.location_id.isnot(None),
+        TelemetryReading.quality_flag.in_(["good", "suspect"]),
+    )
+
+    # Per-sensor aggregates: for "now" we still need the latest value, so we
+    # pull avg+min+max+latest_ts and, for live, the value at latest_ts.
+    if live:
+        latest_ts_subq = (
+            select(
+                TelemetryReading.location_id.label("location_id"),
+                func.max(TelemetryReading.recorded_at).label("max_ts"),
+            )
+            .where(*base_filters)
+            .group_by(TelemetryReading.location_id)
+            .subquery()
+        )
+        stmt = (
+            select(
+                TelemetryReading.location_id,
+                TelemetryReading.value,
+                TelemetryReading.recorded_at,
+                TelemetryReading.unit,
+            )
+            .join(
+                latest_ts_subq,
+                (TelemetryReading.location_id == latest_ts_subq.c.location_id)
+                & (TelemetryReading.recorded_at == latest_ts_subq.c.max_ts),
+            )
+            .where(
+                TelemetryReading.building_id == building_id,
+                TelemetryReading.metric_type == "temperature",
+            )
+        )
+        raw = (await db.execute(stmt)).all()
+        # one latest reading per sensor
+        per_sensor: dict[str, Any] = {}
+        for r in raw:
+            prev = per_sensor.get(r.location_id)
+            if prev is None or r.recorded_at > prev.recorded_at:
+                per_sensor[r.location_id] = r
+        sensor_rows = [
+            (r.location_id, float(r.value), float(r.value), float(r.value),
+             r.recorded_at, r.unit or "C")
+            for r in per_sensor.values()
+        ]
+    else:
+        stmt = (
+            select(
+                TelemetryReading.location_id,
+                func.avg(TelemetryReading.value).label("avg_val"),
+                func.min(TelemetryReading.value).label("min_val"),
+                func.max(TelemetryReading.value).label("max_val"),
+                func.max(TelemetryReading.recorded_at).label("latest_ts"),
+                func.min(TelemetryReading.unit).label("unit"),
+            )
+            .where(*base_filters)
+            .group_by(TelemetryReading.location_id)
+        )
+        rows = (await db.execute(stmt)).all()
+        sensor_rows = [
+            (r.location_id, float(r.avg_val), float(r.min_val), float(r.max_val),
+             r.latest_ts, r.unit or "C")
+            for r in rows
+        ]
+
+    if not sensor_rows:
+        return []
+
+    loc_ids = {sr[0] for sr in sensor_rows}
+    room_map = await _resolve_placements_to_rooms(db, loc_ids)
+
+    per_room_vals: dict[str, list[float]] = defaultdict(list)
+    per_room_min: dict[str, float] = {}
+    per_room_max: dict[str, float] = {}
+    per_room_latest: dict[str, datetime] = {}
+    per_room_unit: dict[str, str] = {}
+    per_room_count: dict[str, int] = defaultdict(int)
+    for loc_id, avg_v, min_v, max_v, ts, unit in sensor_rows:
+        rid = room_map.get(loc_id, loc_id)
+        per_room_vals[rid].append(avg_v)
+        per_room_min[rid] = min_v if rid not in per_room_min else min(per_room_min[rid], min_v)
+        per_room_max[rid] = max_v if rid not in per_room_max else max(per_room_max[rid], max_v)
+        per_room_count[rid] += 1
+        if rid not in per_room_latest or (ts and ts > per_room_latest[rid]):
+            per_room_latest[rid] = ts
+        per_room_unit[rid] = unit
+
+    name_rows = (
+        await db.execute(
+            select(Location.id, Location.name).where(Location.id.in_(per_room_vals.keys()))
+        )
+    ).all()
+    names = {lid: ln for lid, ln in name_rows}
+    floor_map = await _resolve_rooms_to_floors(db, building_id, set(per_room_vals.keys()))
+
+    return [
+        {
+            "locationId": rid,
+            "name": names.get(rid, rid),
+            "value": round(sum(vals) / len(vals), 2),
+            "minValue": round(per_room_min[rid], 2),
+            "maxValue": round(per_room_max[rid], 2),
+            "unit": per_room_unit[rid],
+            "recordedAt": per_room_latest[rid].isoformat() if per_room_latest[rid] else None,
+            "floor": floor_map.get(rid, {}).get("name"),
+            "floorCode": floor_map.get(rid, {}).get("code"),
+            "sampleCount": per_room_count[rid],
+        }
+        for rid, vals in per_room_vals.items()
+    ]
+
+
+async def tool_get_temperature_extremes(
+    db: AsyncSession,
+    building_id: str,
+    window: str = "now",
+    floor: str | None = None,
+    limit: int = 5,
+    **_: Any,
+) -> dict:
+    """Rank rooms by temperature: hottest and coldest, over a time window.
+
+    window: "now" (live latest per room), "day" (last 24h average), or "week"
+    (last 7 days average). For day/week each room also carries min/max. Pass
+    `floor` to restrict to a floor. FM / admin tool.
+    """
+    win = (window or "now").strip().lower()
+    if win not in _WINDOW_HOURS:
+        win = "now"
+    limit = max(1, min(int(limit or 5), 20))
+
+    readings = await _room_temps_window(db, building_id, win)
+    readings = _filter_readings_by_floor(readings, floor)
+    if not readings:
+        return {
+            "ok": False,
+            "reason": f"No temperature readings for window '{win}'"
+            + (f" on floor matching '{floor}'." if floor else "."),
+        }
+
+    hottest = sorted(readings, key=lambda x: x["value"], reverse=True)[:limit]
+    coldest = sorted(readings, key=lambda x: x["value"])[:limit]
+    avg = round(sum(r["value"] for r in readings) / len(readings), 2)
+    return {
+        "ok": True,
+        "window": win,
+        "unit": readings[0]["unit"],
+        "floorFilter": floor or None,
+        "averageValue": avg,
+        "roomCount": len(readings),
+        "hottest": hottest,
+        "coldest": coldest,
+    }
+
+
+async def tool_get_comfort_by_room(
+    db: AsyncSession,
+    building_id: str,
+    days: int = 7,
+    floor: str | None = None,
+    **_: Any,
+) -> dict:
+    """Aggregate occupant comfort votes per room to find the most uncomfortable.
+
+    Thermal comfort is the centred ASHRAE scale -3 (cold) .. 0 (neutral) ..
+    +3 (hot); discomfort is the mean absolute distance from 0. Returns rooms
+    ranked by discomfort, plus the warmest- and coolest-reported rooms. Pass
+    `floor` to restrict to a floor. FM / admin tool.
+    """
+    from collections import defaultdict
+
+    days = max(1, min(int(days or 7), 90))
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
+    rows = (
+        await db.execute(
+            select(Vote)
+            .where(Vote.building_id == building_id, Vote.created_at >= cutoff)
+            .order_by(Vote.created_at.desc())
+            .limit(10000)
+        )
+    ).scalars().all()
+
+    agg: dict[str, dict] = defaultdict(
+        lambda: {"thermals": [], "floor": None, "floorLabel": None,
+                 "stuffy": 0, "airN": 0}
+    )
+    for v in rows:
+        p = v.payload or {}
+        zone = p.get("zone") or p.get("room") or p.get("room_label")
+        tc = p.get("thermal_comfort")
+        if not zone or tc is None:
+            continue
+        try:
+            tc = float(tc)
+        except (TypeError, ValueError):
+            continue
+        a = agg[str(zone)]
+        a["thermals"].append(tc)
+        if a["floor"] is None and (p.get("floor") or p.get("floor_label")):
+            a["floor"] = p.get("floor")
+            a["floorLabel"] = p.get("floor_label")
+        air = p.get("air")
+        if air is not None:
+            a["airN"] += 1
+            if str(air).lower() == "stuffy":
+                a["stuffy"] += 1
+
+    if not agg:
+        return {
+            "ok": False,
+            "reason": f"No occupant comfort votes in the last {days} days.",
+        }
+
+    rooms: list[dict] = []
+    total_votes = 0
+    for zone, a in agg.items():
+        ts = a["thermals"]
+        n = len(ts)
+        if n == 0:
+            continue
+        total_votes += n
+        mean = sum(ts) / n
+        discomfort = sum(abs(x) for x in ts) / n
+        rooms.append(
+            {
+                "room": zone,
+                "votes": n,
+                "meanThermal": round(mean, 2),
+                "discomfort": round(discomfort, 2),
+                "hotShare": round(sum(1 for x in ts if x >= 1) / n, 2),
+                "coldShare": round(sum(1 for x in ts if x <= -1) / n, 2),
+                "stuffyShare": round(a["stuffy"] / a["airN"], 2) if a["airN"] else None,
+                "floor": a["floor"],
+                "floorLabel": a["floorLabel"],
+            }
+        )
+
+    rooms = _filter_readings_by_floor(rooms, floor)
+    if not rooms:
+        return {
+            "ok": False,
+            "reason": f"No comfort votes for floor matching '{floor}'."
+            if floor else f"No comfort votes in the last {days} days.",
+        }
+
+    most_uncomfortable = sorted(rooms, key=lambda r: r["discomfort"], reverse=True)[:10]
+    warmest_reported = sorted(
+        (r for r in rooms if r["meanThermal"] > 0),
+        key=lambda r: r["meanThermal"], reverse=True,
+    )[:5]
+    coolest_reported = sorted(
+        (r for r in rooms if r["meanThermal"] < 0),
+        key=lambda r: r["meanThermal"],
+    )[:5]
+
+    return {
+        "ok": True,
+        "days": days,
+        "floorFilter": floor or None,
+        "totalVotes": total_votes,
+        "roomCount": len(rooms),
+        "mostUncomfortable": most_uncomfortable,
+        "warmestReported": warmest_reported,
+        "coolestReported": coolest_reported,
+    }
+
+
 async def tool_get_temperature_trend(
     db: AsyncSession, building_id: str, hours: int = 6, **_: Any,
 ) -> dict:
@@ -377,10 +720,16 @@ async def tool_create_complaint(
 # ──────────────────────────────────────────────────────────────────────────
 
 
-def build_tool_declarations() -> types.Tool:
-    """Return the Gemini Tool containing all function declarations."""
-    return types.Tool(
-        function_declarations=[
+def build_tool_declarations(role: Any = None) -> types.Tool:
+    """Return the Gemini Tool with all function declarations for this role.
+
+    The building-wide analytics tools (temperature rankings, occupant comfort
+    by room) are only declared for admins and facility managers. Occupants get
+    the base set plus their own personal vote history.
+    """
+    is_analyst = _role_name(role) in _ANALYTICS_ROLES if role is not None else False
+
+    declarations = [
             types.FunctionDeclaration(
                 name="get_current_temperature",
                 description=(
@@ -489,8 +838,66 @@ def build_tool_declarations() -> types.Tool:
                     required=["complaint_type", "title"],
                 ),
             ),
+    ]
+
+    if is_analyst:
+        declarations += [
+            types.FunctionDeclaration(
+                name="get_temperature_extremes",
+                description=(
+                    "FM/admin: rank rooms by temperature — the hottest and "
+                    "coldest rooms — over a window. window='now' uses each room's "
+                    "live reading; 'day' the last 24h average; 'week' the last 7 "
+                    "days average (day/week also include each room's min/max). "
+                    "Use when a manager asks which rooms are hottest/coldest right "
+                    "now, today, or this week. Pass 'floor' to scope to a floor."
+                ),
+                parameters=types.Schema(
+                    type=types.Type.OBJECT,
+                    properties={
+                        "window": types.Schema(
+                            type=types.Type.STRING,
+                            description="One of: now, day, week. Default 'now'.",
+                        ),
+                        "floor": types.Schema(
+                            type=types.Type.STRING,
+                            description="Optional floor name/code substring to scope to.",
+                        ),
+                        "limit": types.Schema(
+                            type=types.Type.INTEGER,
+                            description="How many rooms per list (default 5, max 20).",
+                        ),
+                    },
+                ),
+            ),
+            types.FunctionDeclaration(
+                name="get_comfort_by_room",
+                description=(
+                    "FM/admin: aggregate ALL occupants' comfort votes per room "
+                    "over the last N days to find which rooms occupants report as "
+                    "most uncomfortable. Returns rooms ranked by discomfort (mean "
+                    "absolute distance from neutral on the -3..+3 thermal scale), "
+                    "plus the warmest- and coolest-reported rooms and a stuffiness "
+                    "share. Use when a manager asks which rooms people are "
+                    "unhappy/complaining about. Pass 'floor' to scope to a floor."
+                ),
+                parameters=types.Schema(
+                    type=types.Type.OBJECT,
+                    properties={
+                        "days": types.Schema(
+                            type=types.Type.INTEGER,
+                            description="How many days back to look (default 7, max 90).",
+                        ),
+                        "floor": types.Schema(
+                            type=types.Type.STRING,
+                            description="Optional floor name/code substring to scope to.",
+                        ),
+                    },
+                ),
+            ),
         ]
-    )
+
+    return types.Tool(function_declarations=declarations)
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -508,10 +915,30 @@ async def dispatch_tool(
 ) -> dict:
     """Execute a tool by name. Unknown tools return an error dict."""
     args = args or {}
+    # Building-wide analytics are FM/admin only — guard even if a model is
+    # somehow told about them, so an occupant session can never read them.
+    if name in _ANALYTICS_TOOLS and _role_name(user.role) not in _ANALYTICS_ROLES:
+        return {
+            "ok": False,
+            "reason": "This data is only available to facility managers and admins.",
+        }
     try:
         if name == "get_current_temperature":
             return await tool_get_current_temperature(
                 db, building_id, floor=args.get("floor"),
+            )
+        if name == "get_temperature_extremes":
+            return await tool_get_temperature_extremes(
+                db, building_id,
+                window=args.get("window", "now"),
+                floor=args.get("floor"),
+                limit=args.get("limit", 5),
+            )
+        if name == "get_comfort_by_room":
+            return await tool_get_comfort_by_room(
+                db, building_id,
+                days=args.get("days", 7),
+                floor=args.get("floor"),
             )
         if name == "get_temperature_trend":
             return await tool_get_temperature_trend(
