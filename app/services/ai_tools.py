@@ -30,11 +30,13 @@ from ..models.vote import Vote
 async def tool_get_current_temperature(
     db: AsyncSession, building_id: str, **_: Any,
 ) -> dict:
-    """Latest temperature readings for the building, plus a building-wide average.
+    """Current (live) temperature per room for the building, plus a building-wide average.
 
-    Matches the dashboard /room-summary endpoint: filters out bad-quality and
-    null-location rows, averages sensors within each room, and collapses
-    placement-level rows into their parent room.
+    Uses each sensor's MOST RECENT reading (not a 24h time-average), so the
+    numbers match the dashboard's live room cards. Filters out bad-quality and
+    null-location rows, collapses placement-level rows into their parent room,
+    and averages co-located sensors within each room (spatial only, never over
+    time). A 24h freshness window drops dead/stale sensors.
     """
     from collections import defaultdict
     from ..api.telemetry import _resolve_placements_to_rooms
@@ -42,25 +44,53 @@ async def tool_get_current_temperature(
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(hours=24)
 
-    stmt = (
+    # Most recent timestamp per sensor location, within the freshness window.
+    latest_ts_subq = (
         select(
-            TelemetryReading.location_id,
-            func.avg(TelemetryReading.value).label("avg_val"),
-            func.max(TelemetryReading.recorded_at).label("latest_ts"),
-            func.min(TelemetryReading.unit).label("unit"),
+            TelemetryReading.location_id.label("location_id"),
+            func.max(TelemetryReading.recorded_at).label("max_ts"),
         )
         .where(
             TelemetryReading.building_id == building_id,
             TelemetryReading.metric_type == "temperature",
             TelemetryReading.recorded_at >= cutoff,
+            TelemetryReading.recorded_at <= now,
             TelemetryReading.location_id.isnot(None),
             TelemetryReading.quality_flag.in_(["good", "suspect"]),
         )
         .group_by(TelemetryReading.location_id)
+        .subquery()
     )
-    rows = (await db.execute(stmt)).all()
-    if not rows:
+
+    # Pull the actual latest reading (value + unit) for each sensor location.
+    stmt = (
+        select(
+            TelemetryReading.location_id,
+            TelemetryReading.value,
+            TelemetryReading.recorded_at,
+            TelemetryReading.unit,
+        )
+        .join(
+            latest_ts_subq,
+            (TelemetryReading.location_id == latest_ts_subq.c.location_id)
+            & (TelemetryReading.recorded_at == latest_ts_subq.c.max_ts),
+        )
+        .where(
+            TelemetryReading.building_id == building_id,
+            TelemetryReading.metric_type == "temperature",
+        )
+    )
+    raw_rows = (await db.execute(stmt)).all()
+    if not raw_rows:
         return {"ok": False, "reason": "No temperature readings in the last 24 hours."}
+
+    # Dedupe to one latest reading per sensor (ties on identical timestamps).
+    per_sensor: dict[str, Any] = {}
+    for r in raw_rows:
+        prev = per_sensor.get(r.location_id)
+        if prev is None or r.recorded_at > prev.recorded_at:
+            per_sensor[r.location_id] = r
+    rows = list(per_sensor.values())
 
     loc_ids = {r.location_id for r in rows}
     room_map = await _resolve_placements_to_rooms(db, loc_ids)
@@ -70,9 +100,9 @@ async def tool_get_current_temperature(
     per_room_unit: dict[str, str] = {}
     for r in rows:
         rid = room_map.get(r.location_id, r.location_id)
-        per_room_vals[rid].append(float(r.avg_val))
-        if rid not in per_room_latest or r.latest_ts > per_room_latest[rid]:
-            per_room_latest[rid] = r.latest_ts
+        per_room_vals[rid].append(float(r.value))
+        if rid not in per_room_latest or r.recorded_at > per_room_latest[rid]:
+            per_room_latest[rid] = r.recorded_at
         per_room_unit[rid] = r.unit or "C"
 
     name_rows = (
@@ -291,12 +321,14 @@ def build_tool_declarations() -> types.Tool:
             types.FunctionDeclaration(
                 name="get_current_temperature",
                 description=(
-                    "Get the building's current temperature: building-wide "
-                    "average, explicit warmest and coolest rooms, plus per-room "
-                    "readings sorted hottest→coolest. Use the 'warmest' and "
-                    "'coolest' fields directly — do not infer them from the list. "
-                    "Call this when the user asks how the building is feeling, "
-                    "asks about temperature, or says 'how are you'."
+                    "Get the building's current (LIVE) temperature: each room's "
+                    "most recent sensor reading, a building-wide average of those "
+                    "live values, explicit warmest and coolest rooms, plus per-room "
+                    "readings sorted hottest→coolest. These match the dashboard's "
+                    "live room cards. Use the 'warmest' and 'coolest' fields "
+                    "directly — do not infer them from the list. Call this when the "
+                    "user asks how the building is feeling, asks about temperature, "
+                    "or says 'how are you'."
                 ),
                 parameters=types.Schema(
                     type=types.Type.OBJECT,
