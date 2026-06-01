@@ -54,9 +54,10 @@ logger = logging.getLogger("comfortos.priva")
 # SignalR JSON-protocol record separator
 RS = "\x1e"
 
-# Plausible room-temperature range (°C). Readings outside are dropped as faults
-# (e.g. disconnected sensors report a stuck 160 °C).
-PLAUSIBLE_MIN = -10.0
+# Plausible room-temperature range (°C). Readings outside are dropped as faults:
+#   - disconnected sensors report a stuck 0 °C (or 160 °C) — neither is a real
+#     occupied-room temperature, so the floor is 5 °C, not 0/-10.
+PLAUSIBLE_MIN = 5.0
 PLAUSIBLE_MAX = 60.0
 
 
