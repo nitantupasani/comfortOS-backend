@@ -28,7 +28,7 @@ from ..models.vote import Vote
 
 
 async def tool_get_current_temperature(
-    db: AsyncSession, building_id: str, **_: Any,
+    db: AsyncSession, building_id: str, floor: str | None = None, **_: Any,
 ) -> dict:
     """Current (live) temperature per room for the building, plus a building-wide average.
 
@@ -37,6 +37,11 @@ async def tool_get_current_temperature(
     null-location rows, collapses placement-level rows into their parent room,
     and averages co-located sensors within each room (spatial only, never over
     time). A 24h freshness window drops dead/stale sensors.
+
+    Each reading carries its floor. Pass `floor` (a name or code substring, e.g.
+    "2", "2e", "Begane grond") to restrict the result — including warmest,
+    coolest, and the average — to rooms on matching floors. Omit it for the
+    whole building.
     """
     from collections import defaultdict
     from ..api.telemetry import _resolve_placements_to_rooms
@@ -111,6 +116,7 @@ async def tool_get_current_temperature(
         )
     ).all()
     names = {lid: ln for lid, ln in name_rows}
+    floor_map = await _resolve_rooms_to_floors(db, building_id, set(per_room_vals.keys()))
 
     readings = [
         {
@@ -119,9 +125,29 @@ async def tool_get_current_temperature(
             "value": round(sum(vals) / len(vals), 2),
             "unit": per_room_unit[rid],
             "recordedAt": per_room_latest[rid].isoformat(),
+            "floor": floor_map.get(rid, {}).get("name"),
+            "floorCode": floor_map.get(rid, {}).get("code"),
         }
         for rid, vals in per_room_vals.items()
     ]
+
+    if floor is not None and str(floor).strip():
+        needle = str(floor).strip().casefold()
+
+        def _on_floor(rd: dict) -> bool:
+            return any(
+                needle in str(v).casefold()
+                for v in (rd.get("floor"), rd.get("floorCode"))
+                if v
+            )
+
+        readings = [rd for rd in readings if _on_floor(rd)]
+        if not readings:
+            return {
+                "ok": False,
+                "reason": f"No live temperature readings for floor matching '{floor}'.",
+            }
+
     readings.sort(key=lambda x: x["value"], reverse=True)
     avg = round(sum(r["value"] for r in readings) / len(readings), 2)
     unit = readings[0]["unit"]
@@ -129,11 +155,48 @@ async def tool_get_current_temperature(
         "ok": True,
         "averageValue": avg,
         "unit": unit,
+        "floorFilter": floor or None,
         "locationCount": len(readings),
         "warmest": readings[0],
         "coolest": readings[-1],
         "readings": readings[:20],
     }
+
+
+async def _resolve_rooms_to_floors(
+    db: AsyncSession, building_id: str, room_ids: set[str],
+) -> dict[str, dict]:
+    """Map each room id to its nearest floor ancestor {'name', 'code'}.
+
+    Walks the parent chain until a location of type 'floor' is found. Rooms
+    with no floor level in their ancestry are simply absent from the result.
+    """
+    if not room_ids:
+        return {}
+    rows = (
+        await db.execute(
+            select(
+                Location.id,
+                Location.parent_id,
+                Location.type,
+                Location.name,
+                Location.code,
+            ).where(Location.building_id == building_id)
+        )
+    ).all()
+    by_id = {r.id: r for r in rows}
+
+    out: dict[str, dict] = {}
+    for rid in room_ids:
+        cur = by_id.get(rid)
+        seen: set[str] = set()
+        while cur is not None and cur.id not in seen:
+            seen.add(cur.id)
+            if cur.type == "floor":
+                out[rid] = {"name": cur.name, "code": cur.code}
+                break
+            cur = by_id.get(cur.parent_id) if cur.parent_id else None
+    return out
 
 
 async def tool_get_temperature_trend(
@@ -328,11 +391,22 @@ def build_tool_declarations() -> types.Tool:
                     "live room cards. Use the 'warmest' and 'coolest' fields "
                     "directly — do not infer them from the list. Call this when the "
                     "user asks how the building is feeling, asks about temperature, "
-                    "or says 'how are you'."
+                    "or says 'how are you'. To scope to specific floors, pass the "
+                    "'floor' argument; each returned reading also carries its "
+                    "'floor' so you can reason about a floor range yourself."
                 ),
                 parameters=types.Schema(
                     type=types.Type.OBJECT,
-                    properties={},
+                    properties={
+                        "floor": types.Schema(
+                            type=types.Type.STRING,
+                            description=(
+                                "Optional floor name or code substring (e.g. '2', "
+                                "'2e', 'Begane grond') to restrict warmest/coolest/"
+                                "average to that floor. Omit for the whole building."
+                            ),
+                        ),
+                    },
                 ),
             ),
             types.FunctionDeclaration(
@@ -436,7 +510,9 @@ async def dispatch_tool(
     args = args or {}
     try:
         if name == "get_current_temperature":
-            return await tool_get_current_temperature(db, building_id)
+            return await tool_get_current_temperature(
+                db, building_id, floor=args.get("floor"),
+            )
         if name == "get_temperature_trend":
             return await tool_get_temperature_trend(
                 db, building_id, hours=args.get("hours", 6),
