@@ -22,6 +22,12 @@ from ..models.building_tenant import BuildingTenant
 from ..models.user_building_access import UserBuildingAccess
 from ..models.building_config import BuildingConfig
 from ..schemas.vote import VoteSubmitRequest, VoteSubmitResponse
+from ..services.gamification import (
+    eco_points,
+    tier_for,
+    compute_streaks,
+    GROWN_TREE_MIN_POINTS,
+)
 
 router = APIRouter(prefix="/votes", tags=["votes"])
 
@@ -226,6 +232,156 @@ async def get_vote_analytics(
         "buildingName": building.name,
         "totalVotes": len(votes),
         "votes": [v.to_api_dict() for v in votes],
+    }
+
+
+@router.get("/leaderboard")
+async def get_vote_leaderboard(
+    buildingId: str = Query(..., description="Building ID"),
+    limit: int = Query(20, ge=1, le=100, description="Max ranked rows to return"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Occupant contribution leaderboard for a building (gamification).
+
+    Ranks user-attributed votes by eco-points (votes + streak bonus) and grows a
+    tree tier per occupant. Feeds both the occupant Eco screen and the admin/FM
+    engagement stats. Anonymous votes (``user_id IS NULL``) are excluded.
+
+    Access: any authenticated user who may use the building. Restricted buildings
+    apply the same tenant / explicit-grant check as ``submit_vote``.
+    """
+    # Load building
+    building_result = await db.execute(
+        select(Building).where(Building.id == buildingId)
+    )
+    building = building_result.scalar_one_or_none()
+    if building is None:
+        raise HTTPException(status_code=404, detail="Building not found")
+
+    # Access check (mirrors submit_vote): admins / building FMs always allowed;
+    # everyone else needs tenant mapping or an explicit access grant.
+    if building.requires_access_permission and user.role not in (
+        UserRole.admin,
+        UserRole.building_facility_manager,
+    ):
+        has_access = False
+        if user.tenant_id:
+            bt_check = await db.execute(
+                select(BuildingTenant).where(
+                    BuildingTenant.building_id == buildingId,
+                    BuildingTenant.tenant_id == user.tenant_id,
+                    BuildingTenant.is_active == True,  # noqa: E712
+                )
+            )
+            has_access = bt_check.scalar_one_or_none() is not None
+        if not has_access:
+            uba_check = await db.execute(
+                select(UserBuildingAccess).where(
+                    UserBuildingAccess.user_id == user.id,
+                    UserBuildingAccess.building_id == buildingId,
+                    UserBuildingAccess.is_active == True,  # noqa: E712
+                )
+            )
+            has_access = uba_check.scalar_one_or_none() is not None
+        if not has_access:
+            raise HTTPException(
+                status_code=403, detail="This building requires access permission"
+            )
+
+    # Vote count per user (attributed votes only)
+    count_rows = await db.execute(
+        select(VoteModel.user_id, func.count(VoteModel.vote_uuid))
+        .where(
+            VoteModel.building_id == buildingId,
+            VoteModel.user_id.is_not(None),
+        )
+        .group_by(VoteModel.user_id)
+    )
+    vote_counts: dict[str, int] = {uid: cnt for uid, cnt in count_rows.all()}
+
+    if not vote_counts:
+        return {
+            "buildingId": buildingId,
+            "buildingName": building.name,
+            "summary": {
+                "totalContributors": 0,
+                "totalVotes": 0,
+                "totalEcoPoints": 0,
+                "treesGrown": 0,
+                "activeStreaks": 0,
+                "topContributor": None,
+            },
+            "leaderboard": [],
+        }
+
+    # Distinct vote days per user → streaks
+    day_rows = await db.execute(
+        select(VoteModel.user_id, func.date(VoteModel.created_at))
+        .where(
+            VoteModel.building_id == buildingId,
+            VoteModel.user_id.is_not(None),
+        )
+        .group_by(VoteModel.user_id, func.date(VoteModel.created_at))
+    )
+    user_days: dict[str, set] = {}
+    for uid, day in day_rows.all():
+        # func.date may return a date or an ISO string depending on driver
+        if isinstance(day, str):
+            day = date.fromisoformat(day)
+        user_days.setdefault(uid, set()).add(day)
+
+    # Resolve names
+    user_ids = list(vote_counts.keys())
+    name_rows = await db.execute(
+        select(User.id, User.name).where(User.id.in_(user_ids))
+    )
+    names: dict[str, str] = {uid: nm for uid, nm in name_rows.all()}
+
+    # Build entries
+    entries: list[dict] = []
+    for uid, votes in vote_counts.items():
+        current_streak, best_streak = compute_streaks(user_days.get(uid, set()))
+        points = eco_points(votes, best_streak)
+        tier = tier_for(points)
+        entries.append(
+            {
+                "userId": uid,
+                "name": names.get(uid, "Unknown"),
+                "votes": votes,
+                "currentStreak": current_streak,
+                "bestStreak": best_streak,
+                "ecoPoints": points,
+                "tier": tier["key"],
+                "tierLabel": tier["label"],
+                "nextLabel": tier["next_label"],
+                "nextPoints": tier["next_points"],
+                "progress": round(tier["progress"], 3),
+            }
+        )
+
+    entries.sort(key=lambda e: (e["ecoPoints"], e["votes"]), reverse=True)
+    for i, e in enumerate(entries, 1):
+        e["rank"] = i
+
+    summary = {
+        "totalContributors": len(entries),
+        "totalVotes": sum(e["votes"] for e in entries),
+        "totalEcoPoints": sum(e["ecoPoints"] for e in entries),
+        "treesGrown": sum(1 for e in entries if e["ecoPoints"] >= GROWN_TREE_MIN_POINTS),
+        "activeStreaks": sum(1 for e in entries if e["currentStreak"] >= 2),
+        "topContributor": {
+            "name": entries[0]["name"],
+            "ecoPoints": entries[0]["ecoPoints"],
+            "tier": entries[0]["tier"],
+        },
+    }
+
+    return {
+        "buildingId": buildingId,
+        "buildingName": building.name,
+        "summary": summary,
+        "leaderboard": entries[:limit],
     }
 
 
