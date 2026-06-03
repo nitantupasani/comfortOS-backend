@@ -39,6 +39,8 @@ from ..schemas.telemetry import (
     TelemetrySeriesGroup,
     TelemetryPoint,
     TelemetryRoomSummary,
+    TelemetryTrendRoom,
+    TelemetryTrendResponse,
     BuildingTelemetryConfigIn,
 )
 from ..services.ingestion import ingestion_service
@@ -525,6 +527,151 @@ async def room_summary(
         ))
 
     return summaries
+
+
+# -- Query: trend (heating / cooling) -------------------------------------
+
+# °C/hour magnitude below which a room is treated as thermally steady.
+_STABLE_SLOPE = 0.15
+
+
+@router.get("/{building_id}/trend", response_model=TelemetryTrendResponse)
+async def query_trend(
+    building_id: str,
+    metricType: str = Query("temperature"),
+    windowMinutes: int = Query(60, ge=10, le=360),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Per-room heating/cooling trend over the last ``windowMinutes``.
+
+    For each room (sensor placements collapsed to their containing room) we
+    compute the current value, the value at the window start, the change
+    across the window, and a least-squares slope in units/hour. Rooms with
+    |slope| < _STABLE_SLOPE are reported as "stable"; otherwise "heating" or
+    "cooling". Zero-value readings (offline/faulty sensors) are dropped.
+    """
+    from statistics import fmean
+    from collections import defaultdict
+
+    await _verify_building(building_id, db)
+
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(minutes=windowMinutes)
+
+    stmt = (
+        select(
+            TelemetryReading.recorded_at,
+            TelemetryReading.location_id,
+            TelemetryReading.floor,
+            TelemetryReading.zone,
+            TelemetryReading.value,
+            TelemetryReading.unit,
+        )
+        .where(
+            TelemetryReading.building_id == building_id,
+            TelemetryReading.metric_type == metricType,
+            TelemetryReading.recorded_at >= cutoff,
+            TelemetryReading.recorded_at <= now,
+            TelemetryReading.value != 0,
+            TelemetryReading.quality_flag.in_(["good", "suspect"]),
+        )
+        .order_by(TelemetryReading.recorded_at)
+    )
+    result = await db.execute(stmt)
+    rows = result.all()
+
+    # Collapse sensor placements into their containing room so multiple
+    # sensors in one room form a single trend.
+    raw_ids = {r.location_id for r in rows if r.location_id}
+    room_map = await _resolve_placements_to_rooms(db, raw_ids)
+
+    # Group readings per effective room.
+    grouped: dict = defaultdict(list)
+    meta: dict = {}
+    for r in rows:
+        eff = room_map.get(r.location_id, r.location_id) if r.location_id else r.location_id
+        key = eff or r.zone or r.floor or "Building"
+        grouped[key].append((r.recorded_at, float(r.value)))
+        # Keep the first-seen floor/zone/unit for labelling.
+        meta.setdefault(key, {"location_id": eff, "floor": r.floor, "zone": r.zone, "unit": r.unit})
+
+    loc_names = {}
+    loc_ids = [m["location_id"] for m in meta.values() if m["location_id"]]
+    if loc_ids:
+        name_result = await db.execute(
+            select(Location.id, Location.name).where(Location.id.in_(loc_ids))
+        )
+        loc_names = {lid: lname for lid, lname in name_result.all()}
+
+    unit = rows[0].unit if rows else ""
+    trend_rooms: list[TelemetryTrendRoom] = []
+    for key, samples in grouped.items():
+        samples.sort(key=lambda s: s[0])
+        if not samples:
+            continue
+        m = meta[key]
+        latest_ts, current = samples[-1]
+        first_val = samples[0][1]
+
+        slope = _least_squares_slope_per_hour(samples)
+        if slope >= _STABLE_SLOPE:
+            direction = "heating"
+        elif slope <= -_STABLE_SLOPE:
+            direction = "cooling"
+        else:
+            direction = "stable"
+
+        label = loc_names.get(m["location_id"]) if m["location_id"] else None
+        if not label:
+            label = _group_key_for(
+                type("R", (), {"floor": m["floor"], "zone": m["zone"]})(), "room"
+            )
+
+        trend_rooms.append(TelemetryTrendRoom(
+            locationId=m["location_id"],
+            locationName=label,
+            floor=m["floor"],
+            zone=m["zone"],
+            current=round(current, 2),
+            windowStart=round(first_val, 2),
+            delta=round(current - first_val, 2),
+            slopePerHour=round(slope, 3),
+            direction=direction,
+            sampleCount=len(samples),
+            recordedAt=latest_ts.strftime("%Y-%m-%dT%H:%M:%S+00:00"),
+        ))
+
+    trend_rooms.sort(key=lambda t: t.locationName)
+
+    return TelemetryTrendResponse(
+        buildingId=building_id,
+        metricType=metricType,
+        unit=unit or "",
+        windowMinutes=windowMinutes,
+        rooms=trend_rooms,
+    )
+
+
+def _least_squares_slope_per_hour(samples: list[tuple[datetime, float]]) -> float:
+    """Ordinary least-squares slope of value vs time, in units per hour.
+
+    ``samples`` must be non-empty and time-ordered. Returns 0.0 when there
+    is only one point or no time spread (slope undefined).
+    """
+    n = len(samples)
+    if n < 2:
+        return 0.0
+    t0 = samples[0][0]
+    xs = [(ts - t0).total_seconds() / 3600.0 for ts, _ in samples]  # hours
+    ys = [v for _, v in samples]
+    mean_x = sum(xs) / n
+    mean_y = sum(ys) / n
+    num = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys))
+    den = sum((x - mean_x) ** 2 for x in xs)
+    if den == 0:
+        return 0.0
+    return num / den
 
 
 # -- Config ----------------------------------------------------------------

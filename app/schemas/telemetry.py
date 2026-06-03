@@ -103,6 +103,30 @@ class TelemetryRoomSummary(BaseModel):
     isStale: bool = False
 
 
+class TelemetryTrendRoom(BaseModel):
+    """Per-room heating/cooling trend over a recent time window."""
+    locationId: str | None = None
+    locationName: str
+    floor: str | None = None
+    zone: str | None = None
+    current: float
+    windowStart: float
+    delta: float
+    slopePerHour: float
+    direction: str  # "heating" | "cooling" | "stable"
+    sampleCount: int
+    recordedAt: str
+
+
+class TelemetryTrendResponse(BaseModel):
+    """Response for a heating/cooling trend query."""
+    buildingId: str
+    metricType: str
+    unit: str
+    windowMinutes: int
+    rooms: list[TelemetryTrendRoom]
+
+
 class BuildingTelemetryConfigIn(BaseModel):
     """Create or update a building telemetry config entry."""
     buildingId: str
